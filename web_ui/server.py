@@ -237,13 +237,15 @@ def get_or_create_agent(session_id: str, web_search: bool = False,
         agent.reasoning_callback = _reasoning
         
         
-    # ── 深度思考开关：动态切换模型 ──
-    if deep_thinking:
-        agent.model = "deepseek-reasoner"
-        agent.reasoning_config = None
-    else:
-        agent.model = "deepseek-v4-pro"
-        agent.reasoning_config = {"enabled": False, "effort": "none"}
+    # ── 深度思考开关：动态切换模型，同步更新 _primary_runtime ──
+    target_model = "deepseek-reasoner" if deep_thinking else "deepseek-v4-pro"
+    target_reasoning = None if deep_thinking else {"enabled": False, "effort": "none"}
+
+    agent.model = target_model
+    agent.reasoning_config = target_reasoning
+    # 同步更新 _primary_runtime，防止 API 超时重试后被复位
+    if hasattr(agent, "_primary_runtime") and isinstance(agent._primary_runtime, dict):
+        agent._primary_runtime["model"] = target_model
 
     return agent
 
