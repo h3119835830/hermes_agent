@@ -151,11 +151,17 @@ def trigger_memory_summary(session_id: str):
 # Agent helpers
 # ---------------------------------------------------------------------------
 
-def get_or_create_agent(session_id: str):
+def get_or_create_agent(session_id: str, web_search: bool = False):
     if session_id not in sessions:
         return None
     sd = sessions[session_id]
-    if sd["agent"] is None:
+    current_ws = sd.get("web_search_enabled", None)
+
+    if sd["agent"] is None or current_ws != web_search:
+        disabled = []
+        if not web_search:
+            disabled.append("web")
+            
         agent = AIAgent(
             provider="deepseek",
             model="deepseek-v4-pro",
@@ -163,10 +169,13 @@ def get_or_create_agent(session_id: str):
             platform="web",
             session_id=session_id,
             skip_context_files=True,
-            # 方案C：开启原生记忆体系（不再 skip_memory）
+            # 方案C：开启原生记忆体系
             max_iterations=10,
+            disabled_toolsets=disabled
         )
         sd["agent"] = agent
+        sd["web_search_enabled"] = web_search
+        
     return sd["agent"]
 
 
@@ -229,6 +238,7 @@ def chat():
     data = request.get_json(force=True)
     session_id: str = data.get("session_id", "")
     is_regenerate: bool = data.get("regenerate", False)
+    is_web_search: bool = data.get("web_search", False)
     
     if not session_id or session_id not in sessions:
         return jsonify({"error": "无效的会话 ID"}), 400
@@ -277,7 +287,7 @@ def chat():
     def run_agent():
         try:
             status_q.put(("status", "⚙️ 初始化 Agent 工具集..."))
-            agent = get_or_create_agent(session_id)
+            agent = get_or_create_agent(session_id, is_web_search)
             if agent is None:
                 result_q.put(("error", "会话不存在"))
                 return

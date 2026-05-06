@@ -238,6 +238,7 @@ async function sendMessage() {
 
   // Show thinking indicator
   const thinkEl = addThinkingIndicator();
+  const webSearch = document.getElementById('web-search-toggle')?.checked || false;
 
   // SSE fetch
   try {
@@ -245,6 +246,7 @@ async function sendMessage() {
       message:    text,
       session_id: state.currentSessionId,
       attachment: attachment,
+      web_search: webSearch
     });
 
     const response = await fetch('/api/chat', {
@@ -341,6 +343,7 @@ async function regenerateLast() {
 
   // Show thinking indicator
   const thinkEl = addThinkingIndicator();
+  const webSearch = document.getElementById('web-search-toggle')?.checked || false;
 
   try {
     const response = await fetch('/api/chat', {
@@ -348,7 +351,8 @@ async function regenerateLast() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         session_id: state.currentSessionId,
-        regenerate: true
+        regenerate: true,
+        web_search: webSearch
       }),
     });
 

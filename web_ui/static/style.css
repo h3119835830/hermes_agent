@@ -557,6 +557,55 @@ body {
 .attach-remove:hover { color: #f87171; }
 
 /* ── Input Area ── */
+.input-toolbar {
+  padding: 0 20px 8px;
+  display: flex;
+  align-items: center;
+}
+.toggle-switch {
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+  gap: 8px;
+}
+.toggle-switch input {
+  display: none;
+}
+.toggle-switch .slider {
+  position: relative;
+  width: 32px;
+  height: 18px;
+  background-color: var(--border-strong);
+  border-radius: 18px;
+  transition: .3s;
+}
+.toggle-switch .slider:before {
+  content: "";
+  position: absolute;
+  height: 14px;
+  width: 14px;
+  left: 2px;
+  bottom: 2px;
+  background-color: white;
+  border-radius: 50%;
+  transition: .3s;
+}
+.toggle-switch input:checked + .slider {
+  background-color: var(--primary);
+}
+.toggle-switch input:checked + .slider:before {
+  transform: translateX(14px);
+}
+.toggle-text {
+  font-size: 12px;
+  color: var(--text-secondary);
+  user-select: none;
+}
+.toggle-switch input:checked ~ .toggle-text {
+  color: var(--primary);
+  font-weight: 500;
+}
+
 #input-area {
   display: flex;
   align-items: flex-end;
