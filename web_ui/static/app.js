@@ -216,6 +216,117 @@ function scrollToBottom() {
   messagesContainer.scrollTop = messagesContainer.scrollHeight;
 }
 
+// ── SSE Event Helpers ─────────────────────────────────────────────────────────
+
+// 工具调用追踪映射 { toolName -> badgeElement }
+const activeToolBadges = {};
+
+function handleSseEvent(evt, ctx) {
+  // ctx = { thinkEl, getBubble, appendBubbleText, bubbleWrapper }
+  if (evt.type === 'heartbeat') {
+    // still waiting
+
+  } else if (evt.type === 'status') {
+    const statusEl = document.querySelector('#thinking-indicator .thinking-status');
+    if (statusEl) statusEl.textContent = evt.content;
+
+  } else if (evt.type === 'tool_start') {
+    // 在思考气泡下插入工具调用 badge（不移除 thinking indicator）
+    const badge = document.createElement('div');
+    badge.className = 'tool-call-badge running';
+    badge.dataset.tool = evt.name;
+    badge.innerHTML = '<span class="tool-spinner"></span>' + escHtml(evt.label || evt.name);
+    // 插入到 thinking indicator 之前（保持顺序）
+    const thinkEl = $('thinking-indicator');
+    if (thinkEl) {
+      thinkEl.parentNode.insertBefore(badge, thinkEl);
+    } else {
+      messagesContainer.appendChild(badge);
+    }
+    activeToolBadges[evt.name] = badge;
+    scrollToBottom();
+
+  } else if (evt.type === 'tool_done') {
+    const badge = activeToolBadges[evt.name];
+    if (badge) {
+      badge.classList.remove('running');
+      badge.querySelector('.tool-spinner')?.remove();
+      // 完成后 2 秒淡出
+      setTimeout(() => {
+        badge.style.transition = 'opacity 0.5s';
+        badge.style.opacity = '0';
+        setTimeout(() => badge.remove(), 500);
+      }, 2000);
+      delete activeToolBadges[evt.name];
+    }
+
+  } else if (evt.type === 'reasoning') {
+    // 创建或更新思维链折叠面板
+    let box = messagesContainer.querySelector('.reasoning-box');
+    if (!box) {
+      box = document.createElement('details');
+      box.className = 'reasoning-box';
+      box.setAttribute('open', '');
+      box.innerHTML = '<summary>💭 深度思考中…</summary><div class="reasoning-content"></div>';
+      const thinkEl = $('thinking-indicator');
+      if (thinkEl) {
+        thinkEl.parentNode.insertBefore(box, thinkEl);
+      } else {
+        messagesContainer.appendChild(box);
+      }
+    }
+    const content = box.querySelector('.reasoning-content');
+    if (content) {
+      content.textContent += evt.text;
+      content.scrollTop = content.scrollHeight;
+    }
+    scrollToBottom();
+
+  } else if (evt.type === 'chunk') {
+    // 思维链完成 — 锁定折叠
+    const box = messagesContainer.querySelector('.reasoning-box');
+    if (box) {
+      box.removeAttribute('open');
+      const summary = box.querySelector('summary');
+      if (summary) summary.textContent = '💭 已完成思考（点击展开）';
+    }
+    // Remove thinking indicator and create AI bubble on first chunk
+    const thinkEl = $('thinking-indicator');
+    if (thinkEl && thinkEl.parentNode) thinkEl.remove();
+    ctx.appendBubbleText(evt.content);
+    scrollToBottom();
+
+  } else if (evt.type === 'done') {
+    // Update token usage
+    if (evt.token_total !== undefined) {
+      updateTokenDisplay(evt.token_total, evt.token_in, evt.token_out);
+    }
+    // Update session title in sidebar
+    if (evt.session_title) {
+      const activeItem = document.querySelector('.session-item.active .session-title');
+      if (activeItem) activeItem.textContent = evt.session_title;
+    }
+
+  } else if (evt.type === 'error') {
+    const thinkEl = $('thinking-indicator');
+    if (thinkEl && thinkEl.parentNode) thinkEl.remove();
+    addMessage('assistant', '⚠️ 错误：' + (evt.content || '未知错误'));
+  }
+}
+
+function updateTokenDisplay(total, inTok, outTok) {
+  const countEl = document.getElementById('token-count');
+  const boxEl   = document.getElementById('token-box');
+  if (!countEl) return;
+  const fmt = n => n >= 1000 ? (n / 1000).toFixed(1) + 'k' : String(n);
+  countEl.textContent = fmt(total || 0);
+  if (boxEl) {
+    boxEl.classList.add('active');
+    const tip = `本次会话：输入 ${inTok || 0} + 输出 ${outTok || 0} = ${total || 0} tokens`;
+    boxEl.title = tip;
+  }
+}
+
 // ── Send Message (SSE streaming) ─────────────────────────────────────────────
 async function sendMessage() {
   const text = messageInput.value.trim();
@@ -236,11 +347,29 @@ async function sendMessage() {
   const attachment = state.attachment;
   clearAttachment();
 
+  // Clear stale tool badges
+  Object.keys(activeToolBadges).forEach(k => delete activeToolBadges[k]);
+
   // Show thinking indicator
   const thinkEl = addThinkingIndicator();
   const webSearch = document.getElementById('web-search-toggle')?.checked || false;
 
   // SSE fetch
+  let aiBubbleEl = null;
+  let aiBubbleText = '';
+
+  const ctx = {
+    thinkEl,
+    appendBubbleText(chunk) {
+      if (!aiBubbleEl) {
+        aiBubbleEl = addMessage('assistant', '', null, true);
+      }
+      aiBubbleText += chunk;
+      const textDiv = aiBubbleEl.querySelector('.bubble-text');
+      if (textDiv) textDiv.innerHTML = renderMarkdown(aiBubbleText);
+    }
+  };
+
   try {
     const body = JSON.stringify({
       message:    text,
@@ -258,8 +387,6 @@ async function sendMessage() {
     const reader  = response.body.getReader();
     const decoder = new TextDecoder();
     let   buffer  = '';
-    let   aiBubbleEl = null;
-    let   aiBubbleText = '';
 
     while (true) {
       const { done, value } = await reader.read();
@@ -273,50 +400,24 @@ async function sendMessage() {
         if (!line.startsWith('data: ')) continue;
         try {
           const evt = JSON.parse(line.slice(6));
-
-          if (evt.type === 'heartbeat') {
-            // still thinking, nothing to do
-          } else if (evt.type === 'status') {
-            // 显示进度状态
-            const statusEl = document.querySelector('#thinking-indicator .thinking-status');
-            if (statusEl) statusEl.textContent = evt.content;
-          } else if (evt.type === 'chunk') {
-            // Remove thinking indicator and create AI bubble on first chunk
-            if (thinkEl && thinkEl.parentNode) thinkEl.remove();
-
-            if (!aiBubbleEl) {
-              aiBubbleEl = addMessage('assistant', '', null, true);
-            }
-
-            aiBubbleText += evt.content;
-            const textDiv = aiBubbleEl.querySelector('.bubble-text');
-            if (textDiv) textDiv.innerHTML = renderMarkdown(aiBubbleText);
-            scrollToBottom();
-
-          } else if (evt.type === 'done') {
-            // Update session title in sidebar
-            if (evt.session_title) {
-              const activeItem = document.querySelector('.session-item.active .session-title');
-              if (activeItem) activeItem.textContent = evt.session_title;
-            }
+          if (evt.type === 'done') {
+            handleSseEvent(evt, ctx);
             // Refresh session list
             const listRes = await fetch('/api/sessions');
             renderSessionList(await listRes.json());
-            // Re-highlight active
             document.querySelectorAll('.session-item').forEach(el => {
               el.classList.toggle('active', el.dataset.id === state.currentSessionId);
             });
-
-          } else if (evt.type === 'error') {
-            if (thinkEl && thinkEl.parentNode) thinkEl.remove();
-            addMessage('assistant', `⚠️ 错误：${evt.content}`);
+          } else {
+            handleSseEvent(evt, ctx);
           }
         } catch (_) { /* ignore JSON parse errors */ }
       }
     }
   } catch (e) {
-    if (thinkEl && thinkEl.parentNode) thinkEl.remove();
-    addMessage('assistant', `⚠️ 网络错误：${e.message}`);
+    const thinkElNow = $('thinking-indicator');
+    if (thinkElNow && thinkElNow.parentNode) thinkElNow.remove();
+    addMessage('assistant', '⚠️ 网络错误：' + e.message);
   } finally {
     state.isStreaming = false;
     sendBtn.disabled = false;
@@ -324,6 +425,7 @@ async function sendMessage() {
     messageInput.focus();
   }
 }
+
 
 // ── Regenerate ───────────────────────────────────────────────────────────────
 async function regenerateLast() {

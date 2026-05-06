@@ -151,7 +151,8 @@ def trigger_memory_summary(session_id: str):
 # Agent helpers
 # ---------------------------------------------------------------------------
 
-def get_or_create_agent(session_id: str, web_search: bool = False):
+def get_or_create_agent(session_id: str, web_search: bool = False,
+                        event_q: queue.Queue = None):
     if session_id not in sessions:
         return None
     sd = sessions[session_id]
@@ -161,7 +162,20 @@ def get_or_create_agent(session_id: str, web_search: bool = False):
         disabled = []
         if not web_search:
             disabled.append("web")
-            
+
+        def _tool_start(tool_name, args, **kw):
+            if event_q:
+                label = _tool_label(tool_name, args)
+                event_q.put(("tool_start", {"name": tool_name, "label": label}))
+
+        def _tool_complete(tool_name, result, **kw):
+            if event_q:
+                event_q.put(("tool_done", {"name": tool_name}))
+
+        def _reasoning(text, **kw):
+            if event_q:
+                event_q.put(("reasoning", {"text": text}))
+
         agent = AIAgent(
             provider="deepseek",
             model="deepseek-v4-pro",
@@ -169,14 +183,56 @@ def get_or_create_agent(session_id: str, web_search: bool = False):
             platform="web",
             session_id=session_id,
             skip_context_files=True,
-            # 方案C：开启原生记忆体系
             max_iterations=10,
-            disabled_toolsets=disabled
+            disabled_toolsets=disabled,
+            tool_start_callback=_tool_start,
+            tool_complete_callback=_tool_complete,
+            reasoning_callback=_reasoning,
         )
         sd["agent"] = agent
         sd["web_search_enabled"] = web_search
-        
+    else:
+        # 已有 agent，但本次 event_q 不同，需要更新 callback 绑定
+        agent = sd["agent"]
+        if event_q is not None:
+            def _tool_start(tool_name, args, **kw):
+                label = _tool_label(tool_name, args)
+                event_q.put(("tool_start", {"name": tool_name, "label": label}))
+
+            def _tool_complete(tool_name, result, **kw):
+                event_q.put(("tool_done", {"name": tool_name}))
+
+            def _reasoning(text, **kw):
+                event_q.put(("reasoning", {"text": text}))
+
+            agent.tool_start_callback = _tool_start
+            agent.tool_complete_callback = _tool_complete
+            agent.reasoning_callback = _reasoning
+
     return sd["agent"]
+
+
+def _tool_label(tool_name: str, args: dict) -> str:
+    """生成工具调用的人类可读标签"""
+    labels = {
+        "web_search": lambda a: f"🔍 搜索「{str(a.get('query', ''))[:30]}」",
+        "web_extract": lambda a: f"📄 阅读网页",
+        "web_crawl": lambda a: f"🕷️ 爬取网站",
+        "terminal": lambda a: f"💻 执行命令「{str(a.get('command', ''))[:30]}」",
+        "read_file": lambda a: f"📂 读取文件「{str(a.get('path', ''))[:30]}」",
+        "write_file": lambda a: f"✏️ 写入文件「{str(a.get('path', ''))[:30]}」",
+        "vision_analyze": lambda a: f"👁️ 分析图片",
+        "memory": lambda a: f"🧠 访问记忆",
+        "todo": lambda a: f"📋 操作待办",
+        "browser_navigate": lambda a: f"🌐 浏览器导航「{str(a.get('url', ''))[:30]}」",
+    }
+    fn = labels.get(tool_name)
+    if fn:
+        try:
+            return fn(args or {})
+        except Exception:
+            pass
+    return f"🛠️ 调用工具 {tool_name}"
 
 
 # ---------------------------------------------------------------------------
@@ -239,27 +295,21 @@ def chat():
     session_id: str = data.get("session_id", "")
     is_regenerate: bool = data.get("regenerate", False)
     is_web_search: bool = data.get("web_search", False)
-    
+
     if not session_id or session_id not in sessions:
         return jsonify({"error": "无效的会话 ID"}), 400
 
     if is_regenerate:
-        # 1. 弹出最后一条 assistant 消息（如果在前端已被移除，后端也需同步移除）
         if sessions[session_id]["messages"] and sessions[session_id]["messages"][-1]["role"] == "assistant":
             sessions[session_id]["messages"].pop()
-        
-        # 2. 我们不使用原来的 message，而是给模型一个重新生成的提示指令
         full_message = "请忽略你的上一条回复，并尝试换一种方式或更详细地重新生成一次回复。"
-        
     else:
-        # 正常对话逻辑
         message: str = data.get("message", "").strip()
         attachment: dict = data.get("attachment")
 
         if not message and not attachment:
             return jsonify({"error": "消息不能为空"}), 400
 
-        # Build full prompt (with attachment injected)
         full_message = message
         if attachment:
             if attachment.get("is_text"):
@@ -270,55 +320,71 @@ def chat():
             else:
                 full_message = f"[图片已上传: {attachment['name']}] {message}"
 
-        # Persist user message
         sessions[session_id]["messages"].append({
             "role": "user",
             "content": message,
             "attachment": attachment.get("name") if attachment else None,
         })
 
-        # Auto-title from first message
         if len(sessions[session_id]["messages"]) == 1:
             sessions[session_id]["title"] = message[:30] + ("…" if len(message) > 30 else "")
 
     result_q: queue.Queue = queue.Queue()
-    status_q: queue.Queue = queue.Queue()
+    event_q: queue.Queue = queue.Queue()   # 工具调用 / reasoning 事件队列
 
     def run_agent():
         try:
-            status_q.put(("status", "⚙️ 初始化 Agent 工具集..."))
-            agent = get_or_create_agent(session_id, is_web_search)
+            event_q.put(("status", "⚙️ 初始化 Agent 工具集..."))
+            agent = get_or_create_agent(session_id, is_web_search, event_q)
             if agent is None:
                 result_q.put(("error", "会话不存在"))
                 return
-            status_q.put(("status", "🧠 加载记忆与上下文..."))
-            status_q.put(("status", "🔗 连接 DeepSeek API..."))
+            event_q.put(("status", "🧠 加载记忆与上下文..."))
+            event_q.put(("status", "🔗 连接 DeepSeek API..."))
             response = agent.chat(full_message)
-            result_q.put(("ok", response or "（无回复）"))
+            # 读取 token 用量
+            token_total = getattr(agent, "session_total_tokens", 0)
+            token_in    = getattr(agent, "session_input_tokens", 0) or getattr(agent, "session_prompt_tokens", 0)
+            token_out   = getattr(agent, "session_output_tokens", 0) or getattr(agent, "session_completion_tokens", 0)
+            result_q.put(("ok", response or "（无回复）", token_total, token_in, token_out))
         except Exception as exc:
-            result_q.put(("error", str(exc)))
+            result_q.put(("error", str(exc), 0, 0, 0))
 
     t = threading.Thread(target=run_agent, daemon=True)
     t.start()
 
     def generate():
         while True:
-            # 先消费状态队列
+            # 先消费事件队列（工具调用 / reasoning / status）
             try:
-                _, msg = status_q.get_nowait()
-                yield f"data: {json.dumps({'type': 'status', 'content': msg})}\n\n"
+                ev = event_q.get_nowait()
+                ev_type = ev[0]
+                if ev_type == "status":
+                    yield f"data: {json.dumps({'type': 'status', 'content': ev[1]})}\n\n"
+                elif ev_type == "tool_start":
+                    yield f"data: {json.dumps({'type': 'tool_start', 'name': ev[1]['name'], 'label': ev[1]['label']})}\n\n"
+                elif ev_type == "tool_done":
+                    yield f"data: {json.dumps({'type': 'tool_done', 'name': ev[1]['name']})}\n\n"
+                elif ev_type == "reasoning":
+                    yield f"data: {json.dumps({'type': 'reasoning', 'text': ev[1]['text']})}\n\n"
                 continue
             except queue.Empty:
                 pass
 
             try:
-                kind, content = result_q.get(timeout=0.3)
+                result = result_q.get(timeout=0.3)
                 break
             except queue.Empty:
                 if not t.is_alive():
-                    kind, content = "error", "Agent 线程意外退出"
+                    result = ("error", "Agent 线程意外退出", 0, 0, 0)
                     break
                 yield f"data: {json.dumps({'type': 'heartbeat'})}\n\n"
+
+        kind = result[0]
+        content = result[1]
+        token_total = result[2] if len(result) > 2 else 0
+        token_in    = result[3] if len(result) > 3 else 0
+        token_out   = result[4] if len(result) > 4 else 0
 
         if kind == "error":
             yield f"data: {json.dumps({'type': 'error', 'content': content})}\n\n"
@@ -345,7 +411,7 @@ def chat():
             yield f"data: {json.dumps({'type': 'chunk', 'content': chunk})}\n\n"
             time.sleep(0.012)
 
-        yield f"data: {json.dumps({'type': 'done', 'session_title': sessions[session_id]['title']})}\n\n"
+        yield f"data: {json.dumps({'type': 'done', 'session_title': sessions[session_id]['title'], 'token_total': token_total, 'token_in': token_in, 'token_out': token_out})}\n\n"
 
     return Response(
         generate(),

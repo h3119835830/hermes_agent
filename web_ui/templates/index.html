@@ -33,6 +33,12 @@
   </div>
 
   <div class="header-right">
+    <!-- Token usage display -->
+    <div class="token-box" id="token-box" title="本次会话累计消耗 Token 数">
+      <span class="token-icon">⚡</span>
+      <span id="token-count">0</span>
+      <span class="token-label">tokens</span>
+    </div>
     <div class="theme-switcher" role="group" aria-label="主题切换">
       <button class="theme-btn active" id="theme-gold" data-theme="gold" title="深空黑金">🏆</button>
       <button class="theme-btn"        id="theme-neon"  data-theme="neon"  title="赛博霓虹">⚡</button>
@@ -141,6 +147,6 @@
 </template>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
-<script src="/static/app.js?v=3"></script>
+<script src="/static/app.js?v=4"></script>
 </body>
 </html>

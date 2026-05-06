@@ -198,6 +198,29 @@ body {
   justify-content: center;
 }
 .theme-btn:hover   { background: var(--bg-hover); transform: scale(1.1); }
+.theme-btn.active  { background: var(--accent); color: #000; }
+
+/* ── Token Usage Box ── */
+.token-box {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 12px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-family: 'JetBrains Mono', monospace;
+  cursor: default;
+  transition: border-color 0.3s, color 0.3s;
+}
+.token-box.active {
+  border-color: var(--border-strong);
+  color: var(--accent);
+}
+.token-icon { font-size: 11px; }
+.token-label { font-size: 10px; opacity: 0.6; }
 .theme-btn.active  { background: var(--bg-hover); box-shadow: 0 0 10px var(--accent-dim); }
 
 /* =========================================================================
@@ -414,6 +437,77 @@ body {
   color: var(--accent);
   background: rgba(255,255,255,0.05);
 }
+
+/* ── Tool Call Badge ── */
+.tool-call-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-family: 'JetBrains Mono', monospace;
+  margin: 4px 0;
+  animation: fadeIn 0.2s ease;
+}
+.tool-call-badge.running {
+  border-color: var(--accent-dim);
+  color: var(--accent);
+}
+.tool-call-badge .tool-spinner {
+  width: 10px; height: 10px;
+  border: 2px solid var(--accent-dim);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── Reasoning (思维链) Box ── */
+.reasoning-box {
+  background: rgba(255,255,255,0.025);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent-dim);
+  border-radius: 8px;
+  margin-bottom: 10px;
+  overflow: hidden;
+  animation: fadeIn 0.25s ease;
+}
+.reasoning-box summary {
+  padding: 8px 12px;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-family: 'JetBrains Mono', monospace;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  user-select: none;
+}
+.reasoning-box summary::-webkit-details-marker { display: none; }
+.reasoning-box summary::before {
+  content: '▶';
+  font-size: 9px;
+  transition: transform 0.2s;
+}
+.reasoning-box[open] summary::before { transform: rotate(90deg); }
+.reasoning-box .reasoning-content {
+  padding: 8px 14px 12px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  border-top: 1px solid var(--border);
+  font-family: 'JetBrains Mono', monospace;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+
 
 /* Attachment chip in bubble */
 .attach-chip {
