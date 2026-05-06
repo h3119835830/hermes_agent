@@ -685,7 +685,7 @@ body {
   transition: .3s;
 }
 .toggle-switch input:checked + .slider {
-  background-color: var(--primary);
+  background-color: var(--accent);
 }
 .toggle-switch input:checked + .slider:before {
   transform: translateX(14px);
@@ -696,7 +696,7 @@ body {
   user-select: none;
 }
 .toggle-switch input:checked ~ .toggle-text {
-  color: var(--primary);
+  color: var(--accent);
   font-weight: 500;
 }
 
