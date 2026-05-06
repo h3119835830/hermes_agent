@@ -194,12 +194,9 @@ def get_or_create_agent(session_id: str, web_search: bool = False,
         _tool_start, _tool_complete, _reasoning = _make_callbacks()
         disabled = None if web_search else ["web"]
 
-        # 初始化时动态选择模型
-        initial_model = "deepseek-reasoner" if deep_thinking else "deepseek-v4-pro"
-
         agent = AIAgent(
             provider="deepseek",
-            model=initial_model,
+            model="deepseek-v4-pro",
             quiet_mode=True,
             platform="web",
             session_id=session_id,
@@ -236,12 +233,10 @@ def get_or_create_agent(session_id: str, web_search: bool = False,
         agent.tool_complete_callback = _tool_complete
         agent.reasoning_callback = _reasoning
         
-    # ── 深度思考开关：动态切换模型 ──
+    # ── 深度思考开关：动态传递配置，保持单一 Pro 模型 ──
     if deep_thinking:
-        agent.model = "deepseek-reasoner"
-        agent.reasoning_config = None
+        agent.reasoning_config = {"enabled": True, "effort": "high"}
     else:
-        agent.model = "deepseek-v4-pro"
         agent.reasoning_config = {"enabled": False, "effort": "none"}
 
     return agent
