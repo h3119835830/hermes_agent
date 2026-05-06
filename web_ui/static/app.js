@@ -184,11 +184,20 @@ function addMessage(role, content, attachmentName, animate = true) {
     ? `<div class="attach-chip">📎 ${escHtml(attachmentName)}</div>`
     : '';
 
+  const actions = role === 'assistant'
+    ? `<div class="message-actions">
+         <button class="action-btn" onclick="regenerateLast()" title="重新生成此回复">🔄 重新生成</button>
+       </div>`
+    : '';
+
   div.innerHTML = `
     ${avatar}
-    <div class="bubble">
-      ${attachChip}
-      <div class="bubble-text">${renderMarkdown(content)}</div>
+    <div class="bubble-wrapper">
+      <div class="bubble">
+        ${attachChip}
+        <div class="bubble-text">${renderMarkdown(content)}</div>
+      </div>
+      ${actions}
     </div>`;
 
   messagesContainer.appendChild(div);
@@ -311,6 +320,94 @@ async function sendMessage() {
     sendBtn.disabled = false;
     setStatus('ok', '已连接');
     messageInput.focus();
+  }
+}
+
+// ── Regenerate ───────────────────────────────────────────────────────────────
+async function regenerateLast() {
+  if (state.isStreaming || !state.currentSessionId) return;
+
+  // 1. Remove the last assistant message from UI
+  const messages = Array.from(messagesContainer.querySelectorAll('.message'));
+  const lastMessage = messages[messages.length - 1];
+  if (!lastMessage || !lastMessage.classList.contains('assistant')) {
+    return;
+  }
+  lastMessage.remove();
+
+  state.isStreaming = true;
+  sendBtn.disabled = true;
+  setStatus('streaming');
+
+  // Show thinking indicator
+  const thinkEl = addThinkingIndicator();
+
+  try {
+    const response = await fetch('/api/chat', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        session_id: state.currentSessionId,
+        regenerate: true
+      }),
+    });
+
+    const reader  = response.body.getReader();
+    const decoder = new TextDecoder();
+    let   buffer  = '';
+    let   aiBubbleEl = null;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+
+      const parts = buffer.split('\\n\\n');
+      buffer = parts.pop() || '';
+
+      for (const part of parts) {
+        if (!part.startsWith('data: ')) continue;
+        const jsonStr = part.substring(6).trim();
+        if (!jsonStr) continue;
+
+        try {
+          const evt = JSON.parse(jsonStr);
+
+          if (evt.type === 'heartbeat') {
+            // still thinking
+          } else if (evt.type === 'status') {
+            const statusEl = document.querySelector('#thinking-indicator .thinking-status');
+            if (statusEl) statusEl.textContent = evt.content;
+          } else if (evt.type === 'chunk') {
+            if (thinkEl && thinkEl.parentNode) thinkEl.remove();
+            if (!aiBubbleEl) {
+              const msgDiv = addMessage('assistant', '', null, false);
+              aiBubbleEl = msgDiv.querySelector('.bubble-text');
+            }
+            aiBubbleEl.dataset.raw = (aiBubbleEl.dataset.raw || '') + evt.content;
+            aiBubbleEl.innerHTML = renderMarkdown(aiBubbleEl.dataset.raw);
+            scrollToBottom();
+          } else if (evt.type === 'done') {
+            // trigger sidebar refresh if needed
+          } else if (evt.type === 'error') {
+            if (thinkEl && thinkEl.parentNode) thinkEl.remove();
+            addMessage('assistant', '⚠️ 发生错误: ' + evt.content);
+          }
+        } catch (err) {
+          console.error('SSE JSON parse error:', err, jsonStr);
+        }
+      }
+    }
+  } catch (err) {
+    console.error('Chat request failed:', err);
+    addMessage('assistant', '⚠️ 网络请求失败，请检查后端服务。');
+  } finally {
+    state.isStreaming = false;
+    sendBtn.disabled = false;
+    setStatus('ok', '已连接');
+    messageInput.focus();
+    const thinkElFinal = $('thinking-indicator');
+    if (thinkElFinal) thinkElFinal.remove();
   }
 }
 

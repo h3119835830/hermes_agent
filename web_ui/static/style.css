@@ -336,9 +336,16 @@ body {
   display: flex;
   gap: 10px;
   animation: slideUp 0.3s ease;
+  margin-bottom: 8px;
 }
 .message.user      { flex-direction: row-reverse; align-self: flex-end;   max-width: 520px; }
 .message.assistant { align-self: flex-start;                               max-width: 640px; }
+
+.bubble-wrapper {
+  display: flex;
+  flex-direction: column;
+  max-width: 100%;
+}
 
 @keyframes slideUp {
   from { opacity: 0; transform: translateY(10px); }
@@ -380,6 +387,32 @@ body {
   color: var(--text-primary);
   border-top-left-radius: 4px;
   backdrop-filter: blur(8px);
+}
+
+.message-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 4px;
+  padding-left: 4px;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+.message.assistant:hover .message-actions {
+  opacity: 1;
+}
+.action-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 4px;
+  font-size: 13px;
+  transition: color 0.2s, background 0.2s;
+}
+.action-btn:hover {
+  color: var(--accent);
+  background: rgba(255,255,255,0.05);
 }
 
 /* Attachment chip in bubble */

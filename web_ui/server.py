@@ -227,37 +227,49 @@ def get_memories():
 @app.route("/api/chat", methods=["POST"])
 def chat():
     data = request.get_json(force=True)
-    # strip() 消除前后空白行，这是气泡"虚大"的根本原因
-    message: str = data.get("message", "").strip()
     session_id: str = data.get("session_id", "")
-    attachment: dict = data.get("attachment")
-
+    is_regenerate: bool = data.get("regenerate", False)
+    
     if not session_id or session_id not in sessions:
         return jsonify({"error": "无效的会话 ID"}), 400
-    if not message and not attachment:
-        return jsonify({"error": "消息不能为空"}), 400
 
-    # Build full prompt (with attachment injected)
-    full_message = message
-    if attachment:
-        if attachment.get("is_text"):
-            full_message = (
-                f"[文件: {attachment['name']}]\n```\n{attachment['content'][:8000]}\n```\n\n"
-                + message
-            )
-        else:
-            full_message = f"[图片已上传: {attachment['name']}] {message}"
+    if is_regenerate:
+        # 1. 弹出最后一条 assistant 消息（如果在前端已被移除，后端也需同步移除）
+        if sessions[session_id]["messages"] and sessions[session_id]["messages"][-1]["role"] == "assistant":
+            sessions[session_id]["messages"].pop()
+        
+        # 2. 我们不使用原来的 message，而是给模型一个重新生成的提示指令
+        full_message = "请忽略你的上一条回复，并尝试换一种方式或更详细地重新生成一次回复。"
+        
+    else:
+        # 正常对话逻辑
+        message: str = data.get("message", "").strip()
+        attachment: dict = data.get("attachment")
 
-    # Persist user message
-    sessions[session_id]["messages"].append({
-        "role": "user",
-        "content": message,
-        "attachment": attachment.get("name") if attachment else None,
-    })
+        if not message and not attachment:
+            return jsonify({"error": "消息不能为空"}), 400
 
-    # Auto-title from first message
-    if len(sessions[session_id]["messages"]) == 1:
-        sessions[session_id]["title"] = message[:30] + ("…" if len(message) > 30 else "")
+        # Build full prompt (with attachment injected)
+        full_message = message
+        if attachment:
+            if attachment.get("is_text"):
+                full_message = (
+                    f"[文件: {attachment['name']}]\n```\n{attachment['content'][:8000]}\n```\n\n"
+                    + message
+                )
+            else:
+                full_message = f"[图片已上传: {attachment['name']}] {message}"
+
+        # Persist user message
+        sessions[session_id]["messages"].append({
+            "role": "user",
+            "content": message,
+            "attachment": attachment.get("name") if attachment else None,
+        })
+
+        # Auto-title from first message
+        if len(sessions[session_id]["messages"]) == 1:
+            sessions[session_id]["title"] = message[:30] + ("…" if len(message) > 30 else "")
 
     result_q: queue.Queue = queue.Queue()
     status_q: queue.Queue = queue.Queue()
