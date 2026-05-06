@@ -174,6 +174,15 @@ def get_or_create_agent(session_id: str, web_search: bool = False,
             if event_q:
                 event_q.put(("reasoning", {"text": text}))
 
+        # 把已有的对话历史注入新 Agent，防止切换开关后失忆
+        existing_messages = sd.get("messages", [])
+        prefill = []
+        for m in existing_messages:
+            role = m.get("role", "")
+            content = m.get("content", "")
+            if role in ("user", "assistant") and content:
+                prefill.append({"role": role, "content": content})
+
         agent = AIAgent(
             provider="deepseek",
             model="deepseek-v4-pro",
@@ -186,6 +195,7 @@ def get_or_create_agent(session_id: str, web_search: bool = False,
             tool_start_callback=_tool_start,
             tool_complete_callback=_tool_complete,
             reasoning_callback=_reasoning,
+            prefill_messages=prefill if prefill else None,
         )
         sd["agent"] = agent
         sd["web_search_enabled"] = web_search
