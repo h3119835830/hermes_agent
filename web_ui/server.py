@@ -55,6 +55,9 @@ def load_sessions():
                     "messages": sd.get("messages", []),
                     "created_at": sd.get("created_at", ""),
                     "summarized_count": sd.get("summarized_count", 0),
+                    "token_total": sd.get("token_total", 0),
+                    "token_in":    sd.get("token_in", 0),
+                    "token_out":   sd.get("token_out", 0),
                 }
         except Exception:
             pass
@@ -67,6 +70,9 @@ def save_sessions():
             "messages": sd["messages"],
             "created_at": sd["created_at"],
             "summarized_count": sd.get("summarized_count", 0),
+            "token_total": sd.get("token_total", 0),
+            "token_in":    sd.get("token_in", 0),
+            "token_out":   sd.get("token_out", 0),
         }
         for sid, sd in sessions.items()
     }
@@ -133,7 +139,17 @@ def trigger_memory_summary(session_id: str):
             session_file = SESSION_MEMORY_DIR / f"{session_id[:8]}.md"
             title = sd.get("title", "未命名会话")
             now = datetime.now().strftime("%Y-%m-%d %H:%M")
-            content = f"# 会话摘要：{title}\n\n> 最后更新：{now}\n\n{summary}\n"
+            tok_total = sd.get("token_total", 0)
+            tok_in    = sd.get("token_in", 0)
+            tok_out   = sd.get("token_out", 0)
+            fmt = lambda n: f"{n:,}" if n else "0"
+            token_line = f"⚡ 累计 Token：{fmt(tok_total)}（输入 {fmt(tok_in)} / 输出 {fmt(tok_out)}）"
+            content = (
+                f"# 会话摘要：{title}\n\n"
+                f"> 最后更新：{now}  \n"
+                f"> {token_line}\n\n"
+                f"{summary}\n"
+            )
             with open(session_file, "w", encoding="utf-8") as f:
                 f.write(content)
 
@@ -265,6 +281,9 @@ def list_sessions():
             "message_count": len(sd["messages"]),
             "created_at": sd["created_at"],
             "last_message": last,
+            "token_total": sd.get("token_total", 0),
+            "token_in":    sd.get("token_in", 0),
+            "token_out":   sd.get("token_out", 0),
         })
     result.sort(key=lambda x: x["created_at"], reverse=True)
     return jsonify(result)
@@ -279,6 +298,9 @@ def new_session():
         "messages": [],
         "created_at": datetime.now().isoformat(),
         "summarized_count": 0,
+        "token_total": 0,
+        "token_in":    0,
+        "token_out":   0,
     }
     save_sessions()
     return jsonify({"session_id": sid, "title": "新会话"})
@@ -363,10 +385,16 @@ def chat():
             event_q.put(("status", "🧠 加载记忆与上下文..."))
             event_q.put(("status", "🔗 连接 DeepSeek API..."))
             response = agent.chat(full_message)
-            # 读取 token 用量
+            # 读取 token 用量（当前会话累计）
             token_total = getattr(agent, "session_total_tokens", 0)
             token_in    = getattr(agent, "session_input_tokens", 0) or getattr(agent, "session_prompt_tokens", 0)
             token_out   = getattr(agent, "session_output_tokens", 0) or getattr(agent, "session_completion_tokens", 0)
+            # 回写到 session（持久化）
+            sd = sessions.get(session_id)
+            if sd:
+                sd["token_total"] = token_total
+                sd["token_in"]    = token_in
+                sd["token_out"]   = token_out
             result_q.put(("ok", response or "（无回复）", token_total, token_in, token_out))
         except Exception as exc:
             result_q.put(("error", str(exc), 0, 0, 0))

@@ -75,6 +75,7 @@ async function loadSessions() {
 
     if (list.length > 0) {
       await selectSession(list[0].id);
+      restoreTokenFromSession(list[0].id, list);
       setStatus('ok', '已连接');
     } else {
       await createNewSession();
@@ -96,7 +97,10 @@ function renderSessionList(list) {
       <div class="session-title">${escHtml(s.title)}</div>
       <div class="session-meta">${s.message_count} 条消息${s.last_message ? ' · ' + escHtml(s.last_message) : ''}</div>
     `;
-    item.addEventListener('click', () => selectSession(s.id));
+    item.addEventListener('click', () => {
+      selectSession(s.id);
+      restoreTokenFromSession(s.id, list);
+    });
     sessionList.appendChild(item);
   });
 }
@@ -129,6 +133,20 @@ async function selectSession(sessionId) {
     fetchMemories();
   } catch (e) {
     console.error('Failed to load messages:', e);
+  }
+}
+
+// 从会话列表数据中恢复 token 显示
+function restoreTokenFromSession(sessionId, sessionList) {
+  const s = sessionList.find(s => s.id === sessionId);
+  if (s && s.token_total) {
+    updateTokenDisplay(s.token_total, s.token_in, s.token_out);
+  } else {
+    // 没有历史则重置
+    const countEl = document.getElementById('token-count');
+    const boxEl   = document.getElementById('token-box');
+    if (countEl) countEl.textContent = '0';
+    if (boxEl) { boxEl.classList.remove('active'); boxEl.title = '本次会话累计消耗 Token 数'; }
   }
 }
 
