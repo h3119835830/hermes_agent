@@ -387,8 +387,9 @@ async function sendMessage() {
     const reader  = response.body.getReader();
     const decoder = new TextDecoder();
     let   buffer  = '';
+    let   streamDone = false;
 
-    while (true) {
+    while (!streamDone) {
       const { done, value } = await reader.read();
       if (done) break;
 
@@ -402,12 +403,14 @@ async function sendMessage() {
           const evt = JSON.parse(line.slice(6));
           if (evt.type === 'done') {
             handleSseEvent(evt, ctx);
+            streamDone = true;
             // Refresh session list
             const listRes = await fetch('/api/sessions');
             renderSessionList(await listRes.json());
             document.querySelectorAll('.session-item').forEach(el => {
               el.classList.toggle('active', el.dataset.id === state.currentSessionId);
             });
+            break; // 跳出 for 循环，while 条件为 false 自动退出
           } else {
             handleSseEvent(evt, ctx);
           }

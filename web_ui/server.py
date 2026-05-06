@@ -159,9 +159,7 @@ def get_or_create_agent(session_id: str, web_search: bool = False,
     current_ws = sd.get("web_search_enabled", None)
 
     if sd["agent"] is None or current_ws != web_search:
-        disabled = []
-        if not web_search:
-            disabled.append("web")
+        disabled = None if web_search else ["web"]
 
         def _tool_start(tool_name, args, **kw):
             if event_q:
@@ -419,7 +417,6 @@ def chat():
         headers={
             "Cache-Control": "no-cache",
             "X-Accel-Buffering": "no",
-            "Connection": "keep-alive",
         },
     )
 
