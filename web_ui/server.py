@@ -196,6 +196,8 @@ def get_or_create_agent(session_id: str, web_search: bool = False,
         disabled = None if web_search else ["web"]
 
         agent = AIAgent(
+            provider="deepseek",
+            model="deepseek-v4-pro",
             quiet_mode=True,
             platform="web",
             session_id=session_id,
@@ -286,6 +288,20 @@ def list_sessions():
     result.sort(key=lambda x: x["created_at"], reverse=True)
     return jsonify(result)
 
+
+@app.route("/api/sessions/<session_id>/interrupt", methods=["POST"])
+def interrupt_session(session_id):
+    if session_id in sessions:
+        sd = sessions[session_id]
+        tid = sd.get("current_thread_id")
+        if tid:
+            from tools.interrupt import set_interrupt
+            set_interrupt(True, thread_id=tid)
+        agent = sd.get("agent")
+        if agent:
+            agent._interrupt_requested = True
+        return jsonify({"status": "ok"})
+    return jsonify({"error": "not found"}), 404
 
 @app.route("/api/sessions/new", methods=["POST"])
 def new_session():
@@ -399,6 +415,7 @@ def chat():
 
     t = threading.Thread(target=run_agent, daemon=True)
     t.start()
+    sessions[session_id]["current_thread_id"] = t.ident
 
     def generate():
         while True:

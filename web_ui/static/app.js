@@ -20,6 +20,7 @@ const $ = id => document.getElementById(id);
 const messagesContainer = $('messages-container');
 const messageInput      = $('message-input');
 const sendBtn           = $('send-btn');
+const stopBtn           = $('stop-btn');
 const sessionList       = $('session-list');
 const newSessionBtn     = $('new-session-btn');
 const fileInput         = $('file-input');
@@ -356,7 +357,9 @@ async function sendMessage() {
   if (!state.currentSessionId) return;
 
   state.isStreaming = true;
-  sendBtn.disabled = true;
+  sendBtn.style.display = 'none';
+  stopBtn.style.display = 'flex';
+  stopBtn.disabled = false;
   setStatus('streaming');
 
   // Display user message
@@ -444,7 +447,8 @@ async function sendMessage() {
     addMessage('assistant', '⚠️ 网络错误：' + e.message);
   } finally {
     state.isStreaming = false;
-    sendBtn.disabled = false;
+    sendBtn.style.display = 'flex';
+    stopBtn.style.display = 'none';
     setStatus('ok', '已连接');
     messageInput.focus();
   }
@@ -734,6 +738,17 @@ function bindEvents() {
 
   // Send button
   sendBtn.addEventListener('click', sendMessage);
+
+  // Stop button
+  stopBtn.addEventListener('click', async () => {
+    if (!state.currentSessionId || !state.isStreaming) return;
+    try {
+      stopBtn.disabled = true;
+      await fetch(`/api/sessions/${state.currentSessionId}/interrupt`, { method: 'POST' });
+    } catch (e) {
+      console.error('Failed to interrupt:', e);
+    }
+  });
 
   // File input
   fileInput.addEventListener('change', () => {
