@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Hermes Agent — AI 助手</title>
+  <meta name="description" content="基于 Hermes Agent + DeepSeek 的智能 AI 助手，支持流式对话、文件上传与记忆面板。" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css" />
+  <link rel="stylesheet" href="/static/style.css?v=5" />
+  <style>
+    /* 强制覆盖气泡框宽度，绕过任何缓存 */
+    .message.user      { max-width: 420px !important; }
+    .message.assistant { max-width: 560px !important; }
+    .bubble { padding: 8px 12px !important; font-size: 13px !important; line-height: 1.5 !important; }
+  </style>
+</head>
+<body class="theme-gold">
+
+<!-- ── Header ─────────────────────────────────────────────────────────── -->
+<header id="main-header">
+  <div class="header-left">
+    <span class="logo-icon">⚕</span>
+    <span class="logo-text">Hermes Agent</span>
+  </div>
+
+  <div class="header-center">
+    <span class="status-dot" id="status-dot"></span>
+    <span class="status-text" id="status-text">连接中…</span>
+    <span class="model-badge">DeepSeek</span>
+  </div>
+
+  <div class="header-right">
+    <div class="theme-switcher" role="group" aria-label="主题切换">
+      <button class="theme-btn active" id="theme-gold" data-theme="gold" title="深空黑金">🏆</button>
+      <button class="theme-btn"        id="theme-neon"  data-theme="neon"  title="赛博霓虹">⚡</button>
+      <button class="theme-btn"        id="theme-aurora" data-theme="aurora" title="极光磨砂">🌌</button>
+    </div>
+  </div>
+</header>
+
+<!-- ── Main Layout ─────────────────────────────────────────────────────── -->
+<main id="main-layout">
+
+  <!-- Left: Session Sidebar -->
+  <aside id="session-sidebar">
+    <button id="new-session-btn" class="new-session-btn">
+      <span>＋</span> 新建会话
+    </button>
+    <div class="sidebar-label">历史会话</div>
+    <div id="session-list" role="list"></div>
+  </aside>
+
+  <!-- Center: Chat -->
+  <section id="chat-panel">
+    <div id="messages-container" role="log" aria-live="polite">
+      <!-- Welcome state -->
+      <div id="welcome-screen">
+        <div class="welcome-icon">⚕</div>
+        <h1 class="welcome-title">Hermes Agent</h1>
+        <p class="welcome-sub">由 DeepSeek 驱动 · 支持文件上传 · 自动生成记忆</p>
+        <div class="welcome-tips">
+          <div class="tip-card">💬 发送任意消息开始对话</div>
+          <div class="tip-card">📎 点击附件按钮上传文件</div>
+          <div class="tip-card">🧠 右侧面板查看 Agent 记忆</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Attachment preview -->
+    <div id="attachment-preview" class="attachment-preview hidden">
+      <span class="attach-name" id="attach-name"></span>
+      <button id="attach-remove" class="attach-remove" title="移除附件">✕</button>
+    </div>
+
+    <!-- Input area -->
+    <div id="input-area">
+      <label for="file-input" class="attach-btn" id="attach-btn" title="上传文件 / 图片">
+        📎
+        <input type="file" id="file-input" accept="*/*" hidden />
+      </label>
+      <textarea
+        id="message-input"
+        placeholder="输入消息…（Shift+Enter 换行，Enter 发送）"
+        rows="1"
+        aria-label="消息输入框"
+      ></textarea>
+      <button id="send-btn" class="send-btn" aria-label="发送消息">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="22" y1="2" x2="11" y2="13"/>
+          <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+        </svg>
+      </button>
+    </div>
+  </section>
+
+  <!-- Right: Memory Panel -->
+  <aside id="memory-panel">
+    <div class="memory-header">
+      <span class="memory-icon">🧠</span>
+      <span>记忆面板</span>
+      <span class="memory-badge" id="memory-badge">实时</span>
+    </div>
+
+    <div class="memory-tabs">
+      <button class="mem-tab active" data-tab="MEMORY.md" id="tab-memory">通用记忆</button>
+      <button class="mem-tab" data-tab="USER.md" id="tab-user">用户画像</button>
+    </div>
+
+    <div id="memory-content" class="memory-content">
+      <div class="memory-empty">
+        <div class="memory-empty-icon">💭</div>
+        <p>记忆尚未生成</p>
+        <p class="memory-empty-sub">对话几轮后，Agent 会自动在这里记录重要信息</p>
+      </div>
+    </div>
+  </aside>
+
+</main>
+
+<!-- Thinking indicator template (cloned via JS) -->
+<template id="thinking-tpl">
+  <div class="message assistant thinking" id="thinking-indicator">
+    <div class="avatar">⚕</div>
+    <div class="bubble">
+      <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+      <span class="thinking-status"></span>
+    </div>
+  </div>
+</template>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script src="/static/app.js?v=3"></script>
+</body>
+</html>

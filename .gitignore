@@ -70,3 +70,6 @@ mini-swe-agent/
 result
 website/static/api/skills-index.json
 models-dev-upstream/
+
+web_ui/sessions_data.json
+web_ui/__pycache__/
