@@ -156,11 +156,8 @@ def get_or_create_agent(session_id: str, web_search: bool = False,
     if session_id not in sessions:
         return None
     sd = sessions[session_id]
-    current_ws = sd.get("web_search_enabled", None)
 
-    if sd["agent"] is None or current_ws != web_search:
-        disabled = None if web_search else ["web"]
-
+    def _make_callbacks():
         def _tool_start(tool_name, args, **kw):
             if event_q:
                 label = _tool_label(tool_name, args)
@@ -174,14 +171,12 @@ def get_or_create_agent(session_id: str, web_search: bool = False,
             if event_q:
                 event_q.put(("reasoning", {"text": text}))
 
-        # 把已有的对话历史注入新 Agent，防止切换开关后失忆
-        existing_messages = sd.get("messages", [])
-        prefill = []
-        for m in existing_messages:
-            role = m.get("role", "")
-            content = m.get("content", "")
-            if role in ("user", "assistant") and content:
-                prefill.append({"role": role, "content": content})
+        return _tool_start, _tool_complete, _reasoning
+
+    # ── 首次创建 Agent ──────────────────────────────────────────────────
+    if sd["agent"] is None:
+        _tool_start, _tool_complete, _reasoning = _make_callbacks()
+        disabled = None if web_search else ["web"]
 
         agent = AIAgent(
             provider="deepseek",
@@ -195,29 +190,35 @@ def get_or_create_agent(session_id: str, web_search: bool = False,
             tool_start_callback=_tool_start,
             tool_complete_callback=_tool_complete,
             reasoning_callback=_reasoning,
-            prefill_messages=prefill if prefill else None,
         )
         sd["agent"] = agent
         sd["web_search_enabled"] = web_search
+
     else:
-        # 已有 agent，但本次 event_q 不同，需要更新 callback 绑定
         agent = sd["agent"]
-        if event_q is not None:
-            def _tool_start(tool_name, args, **kw):
-                label = _tool_label(tool_name, args)
-                event_q.put(("tool_start", {"name": tool_name, "label": label}))
+        current_ws = sd.get("web_search_enabled", None)
 
-            def _tool_complete(tool_name, result, **kw):
-                event_q.put(("tool_done", {"name": tool_name}))
+        # ── 联网开关切换：直接更新工具列表，不重建 Agent ────────────────
+        if current_ws != web_search:
+            from model_tools import get_tool_definitions
+            disabled = None if web_search else ["web"]
+            agent.tools = get_tool_definitions(
+                disabled_toolsets=disabled,
+                quiet_mode=True,
+            )
+            agent.valid_tool_names = {
+                t["function"]["name"] for t in agent.tools
+            } if agent.tools else set()
+            sd["web_search_enabled"] = web_search
 
-            def _reasoning(text, **kw):
-                event_q.put(("reasoning", {"text": text}))
-
-            agent.tool_start_callback = _tool_start
-            agent.tool_complete_callback = _tool_complete
-            agent.reasoning_callback = _reasoning
+        # ── 每次请求都更新 callbacks（指向本次的 event_q）───────────────
+        _tool_start, _tool_complete, _reasoning = _make_callbacks()
+        agent.tool_start_callback = _tool_start
+        agent.tool_complete_callback = _tool_complete
+        agent.reasoning_callback = _reasoning
 
     return sd["agent"]
+
 
 
 def _tool_label(tool_name: str, args: dict) -> str:
