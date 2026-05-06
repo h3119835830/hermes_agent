@@ -436,6 +436,7 @@ def chat():
     sessions[session_id]["current_thread_id"] = t.ident
 
     def generate():
+        got_stream_chunks = False  # 记录是否收到过实时 chunk
         while True:
             # 先消费事件队列中的所有事件
             while True:
@@ -451,12 +452,28 @@ def chat():
                     elif ev_type == "reasoning":
                         yield f"data: {json.dumps({'type': 'reasoning', 'text': ev[1]['text']})}\n\n"
                     elif ev_type == "chunk":
+                        got_stream_chunks = True
                         yield f"data: {json.dumps({'type': 'chunk', 'content': ev[1]})}\n\n"
                 except queue.Empty:
                     break
 
             try:
                 result = result_q.get(timeout=0.3)
+                # 关键：获得结果后给事件队列一个小窗口将剩余事件（reasoning）冲刷完
+                time.sleep(0.05)
+                while not event_q.empty():
+                    try:
+                        ev = event_q.get_nowait()
+                        ev_type = ev[0]
+                        if ev_type == "reasoning":
+                            yield f"data: {json.dumps({'type': 'reasoning', 'text': ev[1]['text']})}\n\n"
+                        elif ev_type == "chunk":
+                            got_stream_chunks = True
+                            yield f"data: {json.dumps({'type': 'chunk', 'content': ev[1]})}\n\n"
+                        elif ev_type == "tool_done":
+                            yield f"data: {json.dumps({'type': 'tool_done', 'name': ev[1]['name']})}\n\n"
+                    except queue.Empty:
+                        break
                 break
             except queue.Empty:
                 if not t.is_alive() and event_q.empty():
@@ -489,12 +506,13 @@ def chat():
         if assistant_count > 0 and assistant_count % SUMMARY_EVERY_N == 0 and total_msgs > already_summarized:
             trigger_memory_summary(session_id)
 
-        # Stream in small chunks for typewriter effect
-        chunk_size = 5
-        for i in range(0, len(content), chunk_size):
-            chunk = content[i: i + chunk_size]
-            yield f"data: {json.dumps({'type': 'chunk', 'content': chunk})}\n\n"
-            time.sleep(0.012)
+        # 如果没有收到实时流式 chunk（非流式模式），才按小块和打字机效果输出
+        if not got_stream_chunks:
+            chunk_size = 5
+            for i in range(0, len(content), chunk_size):
+                chunk = content[i: i + chunk_size]
+                yield f"data: {json.dumps({'type': 'chunk', 'content': chunk})}\n\n"
+                time.sleep(0.012)
 
         yield f"data: {json.dumps({'type': 'done', 'session_title': sessions[session_id]['title'], 'token_total': token_total, 'token_in': token_in, 'token_out': token_out})}\n\n"
 
