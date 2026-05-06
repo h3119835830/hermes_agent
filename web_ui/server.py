@@ -196,8 +196,6 @@ def get_or_create_agent(session_id: str, web_search: bool = False,
         disabled = None if web_search else ["web"]
 
         agent = AIAgent(
-            provider="deepseek",
-            model="deepseek-v4-pro",
             quiet_mode=True,
             platform="web",
             session_id=session_id,
