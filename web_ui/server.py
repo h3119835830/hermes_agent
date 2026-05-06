@@ -464,6 +464,25 @@ def chat():
 
             try:
                 result = result_q.get(timeout=0.3)
+                # ── 关键修复：获得结果后，必须将 event_q 剩余事件全部刷入 ──
+                # （reasoning 事件可能在 result 到达后还没消费完）
+                time.sleep(0.05)  # 给最后一批事件 50ms 落地窗口
+                while not event_q.empty():
+                    try:
+                        ev = event_q.get_nowait()
+                        ev_type = ev[0]
+                        if ev_type == "status":
+                            yield f"data: {json.dumps({'type': 'status', 'content': ev[1]})}\n\n"
+                        elif ev_type == "tool_start":
+                            yield f"data: {json.dumps({'type': 'tool_start', 'name': ev[1]['name'], 'label': ev[1]['label']})}\n\n"
+                        elif ev_type == "tool_done":
+                            yield f"data: {json.dumps({'type': 'tool_done', 'name': ev[1]['name']})}\n\n"
+                        elif ev_type == "reasoning":
+                            yield f"data: {json.dumps({'type': 'reasoning', 'text': ev[1]['text']})}\n\n"
+                        elif ev_type == "chunk":
+                            yield f"data: {json.dumps({'type': 'chunk', 'content': ev[1]})}\n\n"
+                    except queue.Empty:
+                        break
                 break
             except queue.Empty:
                 if not t.is_alive() and event_q.empty():
