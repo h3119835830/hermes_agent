@@ -27,8 +27,9 @@ CORS(app)
 HERMES_HOME = Path(get_hermes_home())
 SESSIONS_FILE = Path(__file__).parent / "sessions_data.json"
 MEMORY_DIR = HERMES_HOME / "memories"
-SESSION_MEMORY_DIR = MEMORY_DIR / "sessions"  # 每个会话独立摘要目录
-USER_FILE = MEMORY_DIR / "USER.md"
+SESSION_MEMORY_DIR = MEMORY_DIR / "sessions"  # 会话专属记忆目录
+GLOBAL_MEMORY_FILE = MEMORY_DIR / "MEMORY.md"  # 通用记忆（全局）
+USER_FILE = MEMORY_DIR / "USER.md"             # 用户画像（全局）
 
 # 触发摘要的消息阈值（每隔 N 条 assistant 消息触发一次）
 SUMMARY_EVERY_N = 10
@@ -292,20 +293,21 @@ def get_messages(session_id):
 
 @app.route("/api/memories", methods=["GET"])
 def get_memories():
-    """返回指定会话的摘要 + 用户画像"""
+    """返回三类记忆：会话专属、通用记忆、用户画像"""
     session_id = request.args.get("session_id", "")
-    result = {}
 
-    # 会话专属摘要
+    # 会话专属记忆
     if session_id:
         session_file = SESSION_MEMORY_DIR / f"{session_id[:8]}.md"
-        result["MEMORY.md"] = session_file.read_text(encoding="utf-8") if session_file.exists() else ""
+        session_mem = session_file.read_text(encoding="utf-8") if session_file.exists() else ""
     else:
-        result["MEMORY.md"] = ""
+        session_mem = ""
 
-    # 用户画像（全局共用）
-    result["USER.md"] = USER_FILE.read_text(encoding="utf-8") if USER_FILE.exists() else ""
-    return jsonify(result)
+    return jsonify({
+        "SESSION.md": session_mem,
+        "MEMORY.md":  GLOBAL_MEMORY_FILE.read_text(encoding="utf-8") if GLOBAL_MEMORY_FILE.exists() else "",
+        "USER.md":    USER_FILE.read_text(encoding="utf-8") if USER_FILE.exists() else "",
+    })
 
 
 @app.route("/api/chat", methods=["POST"])

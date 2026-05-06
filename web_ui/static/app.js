@@ -10,8 +10,8 @@ const state = {
   currentSessionId: null,
   isStreaming: false,
   attachment: null,          // { name, content, is_text }
-  activeMemoryTab: 'MEMORY.md',
-  memoryData: { 'MEMORY.md': '', 'USER.md': '' },
+  activeMemoryTab: 'SESSION.md',
+  memoryData: { 'SESSION.md': '', 'MEMORY.md': '', 'USER.md': '' },
   theme: localStorage.getItem('hermes-theme') || 'gold',
 };
 
@@ -594,17 +594,24 @@ function renderMemory(tab) {
   });
 
   if (!content.trim()) {
+    const hints = {
+      'SESSION.md': ['📝', '本会话暂无摘要', '对话满 10 条后自动生成专属记忆'],
+      'MEMORY.md':  ['🧠', '通用记忆尚无内容', '可让 Agent 主动记录跨会话的重要信息'],
+      'USER.md':    ['👤', '用户画像尚未建立', 'Agent 会随着对话逐渐了解你'],
+    };
+    const [icon, title, sub] = hints[tab] || ['💭', '记忆尚未生成', '对话几轮后 Agent 会自动记录'];
     memoryContent.innerHTML = `
       <div class="memory-empty">
-        <div class="memory-empty-icon">💭</div>
-        <p>记忆尚未生成</p>
-        <p class="memory-empty-sub">对话几轮后，Agent 会自动记录重要信息</p>
+        <div class="memory-empty-icon">${icon}</div>
+        <p>${title}</p>
+        <p class="memory-empty-sub">${sub}</p>
       </div>`;
     return;
   }
 
   memoryContent.innerHTML = renderMarkdown(content);
 }
+
 
 // ── Markdown renderer (highlight.js + copy button) ────────────────────────
 function renderMarkdown(text) {
