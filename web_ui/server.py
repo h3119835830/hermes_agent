@@ -169,7 +169,7 @@ def trigger_memory_summary(session_id: str):
 # ---------------------------------------------------------------------------
 
 def get_or_create_agent(session_id: str, web_search: bool = False,
-                        event_q: queue.Queue = None):
+                        deep_thinking: bool = True, event_q: queue.Queue = None):
     if session_id not in sessions:
         return None
     sd = sessions[session_id]
@@ -233,8 +233,14 @@ def get_or_create_agent(session_id: str, web_search: bool = False,
         agent.tool_start_callback = _tool_start
         agent.tool_complete_callback = _tool_complete
         agent.reasoning_callback = _reasoning
+        
+    # ── 深度思考开关：如果关闭，强制不使用 reasoning ──
+    if not deep_thinking:
+        agent.reasoning_config = {"enabled": False, "effort": "none"}
+    else:
+        agent.reasoning_config = None
 
-    return sd["agent"]
+    return agent
 
 
 
@@ -352,6 +358,7 @@ def chat():
     session_id: str = data.get("session_id", "")
     is_regenerate: bool = data.get("regenerate", False)
     is_web_search: bool = data.get("web_search", False)
+    deep_thinking: bool = data.get("deep_thinking", True)
 
     if not session_id or session_id not in sessions:
         return jsonify({"error": "无效的会话 ID"}), 400
@@ -392,7 +399,7 @@ def chat():
     def run_agent():
         try:
             event_q.put(("status", "⚙️ 初始化 Agent 工具集..."))
-            agent = get_or_create_agent(session_id, is_web_search, event_q)
+            agent = get_or_create_agent(session_id, is_web_search, deep_thinking, event_q)
             if agent is None:
                 result_q.put(("error", "会话不存在"))
                 return

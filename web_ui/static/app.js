@@ -377,6 +377,7 @@ async function sendMessage() {
   // Show thinking indicator
   const thinkEl = addThinkingIndicator();
   const webSearch = document.getElementById('web-search-toggle')?.checked || false;
+  const deepThinking = document.getElementById('deep-thinking-toggle')?.checked ?? true;
 
   // SSE fetch
   let aiBubbleEl = null;
@@ -399,7 +400,8 @@ async function sendMessage() {
       message:    text,
       session_id: state.currentSessionId,
       attachment: attachment,
-      web_search: webSearch
+      web_search: webSearch,
+      deep_thinking: deepThinking
     });
 
     const response = await fetch('/api/chat', {
