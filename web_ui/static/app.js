@@ -284,7 +284,7 @@ function handleSseEvent(evt, ctx) {
 
   } else if (evt.type === 'reasoning') {
     // 创建或更新思维链折叠面板
-    let box = messagesContainer.querySelector('.reasoning-box');
+    let box = ctx.reasoningBox;
     if (!box) {
       box = document.createElement('details');
       box.className = 'reasoning-box';
@@ -296,6 +296,7 @@ function handleSseEvent(evt, ctx) {
       } else {
         messagesContainer.appendChild(box);
       }
+      ctx.reasoningBox = box;
     }
     const content = box.querySelector('.reasoning-content');
     if (content) {
@@ -306,10 +307,9 @@ function handleSseEvent(evt, ctx) {
 
   } else if (evt.type === 'chunk') {
     // 思维链完成 — 锁定折叠
-    const box = messagesContainer.querySelector('.reasoning-box');
-    if (box) {
-      box.removeAttribute('open');
-      const summary = box.querySelector('summary');
+    if (ctx.reasoningBox) {
+      ctx.reasoningBox.removeAttribute('open');
+      const summary = ctx.reasoningBox.querySelector('summary');
       if (summary) summary.textContent = '💭 已完成思考（点击展开）';
     }
     // Remove thinking indicator and create AI bubble on first chunk
@@ -385,6 +385,7 @@ async function sendMessage() {
 
   const ctx = {
     thinkEl,
+    reasoningBox: null,
     appendBubbleText(chunk) {
       if (!aiBubbleEl) {
         aiBubbleEl = addMessage('assistant', '', null, true);
