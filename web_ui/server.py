@@ -127,7 +127,7 @@ def trigger_memory_summary(session_id: str):
             prompt = _build_summary_prompt(session_id, new_msgs)
 
             resp = client.chat.completions.create(
-                model="deepseek-v4-pro",
+                model="deepseek-chat",
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=600,
                 temperature=0.3,
@@ -235,6 +235,16 @@ def get_or_create_agent(session_id: str, web_search: bool = False,
         agent.tool_start_callback = _tool_start
         agent.tool_complete_callback = _tool_complete
         agent.reasoning_callback = _reasoning
+        
+        # ── 动态更新联网搜索开关 ──
+        if is_web_search:
+            if agent.disabled_toolsets and "web" in agent.disabled_toolsets:
+                agent.disabled_toolsets.remove("web")
+        else:
+            if agent.disabled_toolsets is None:
+                agent.disabled_toolsets = ["web"]
+            elif "web" not in agent.disabled_toolsets:
+                agent.disabled_toolsets.append("web")
         
     # ── 深度思考开关：动态切换模型 ──
     if deep_thinking:
