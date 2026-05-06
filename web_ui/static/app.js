@@ -124,6 +124,9 @@ async function selectSession(sessionId) {
       scrollToBottom();
     }
     setStatus('ok', '已连接');
+
+    // 切换会话后立刻刷新该会话的专属记忆
+    fetchMemories();
   } catch (e) {
     console.error('Failed to load messages:', e);
   }
@@ -575,7 +578,8 @@ function startMemoryPolling() {
 
 async function fetchMemories() {
   try {
-    const res  = await fetch('/api/memories');
+    const sid = state.currentSessionId || '';
+    const res  = await fetch('/api/memories?session_id=' + encodeURIComponent(sid));
     state.memoryData = await res.json();
     renderMemory(state.activeMemoryTab);
   } catch (_) { /* silent */ }

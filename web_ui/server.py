@@ -27,7 +27,7 @@ CORS(app)
 HERMES_HOME = Path(get_hermes_home())
 SESSIONS_FILE = Path(__file__).parent / "sessions_data.json"
 MEMORY_DIR = HERMES_HOME / "memories"
-MEMORY_FILE = MEMORY_DIR / "MEMORY.md"
+SESSION_MEMORY_DIR = MEMORY_DIR / "sessions"  # 每个会话独立摘要目录
 USER_FILE = MEMORY_DIR / "USER.md"
 
 # 触发摘要的消息阈值（每隔 N 条 assistant 消息触发一次）
@@ -127,14 +127,14 @@ def trigger_memory_summary(session_id: str):
             )
             summary = resp.choices[0].message.content.strip()
 
-            # 确保目录存在
-            MEMORY_DIR.mkdir(parents=True, exist_ok=True)
-
-            # 追加到 MEMORY.md
+            # 写入会话专属摘要文件（覆盖写，始终是最新完整摘要）
+            SESSION_MEMORY_DIR.mkdir(parents=True, exist_ok=True)
+            session_file = SESSION_MEMORY_DIR / f"{session_id[:8]}.md"
+            title = sd.get("title", "未命名会话")
             now = datetime.now().strftime("%Y-%m-%d %H:%M")
-            section = f"\n\n## [{now}] 会话 {session_id[:8]} 摘要\n\n{summary}\n"
-            with open(MEMORY_FILE, "a", encoding="utf-8") as f:
-                f.write(section)
+            content = f"# 会话摘要：{title}\n\n> 最后更新：{now}\n\n{summary}\n"
+            with open(session_file, "w", encoding="utf-8") as f:
+                f.write(content)
 
             # 更新已摘要的消息数
             sd["summarized_count"] = len(messages)
@@ -292,9 +292,19 @@ def get_messages(session_id):
 
 @app.route("/api/memories", methods=["GET"])
 def get_memories():
+    """返回指定会话的摘要 + 用户画像"""
+    session_id = request.args.get("session_id", "")
     result = {}
-    for fname, fpath in [("MEMORY.md", MEMORY_FILE), ("USER.md", USER_FILE)]:
-        result[fname] = fpath.read_text(encoding="utf-8") if fpath.exists() else ""
+
+    # 会话专属摘要
+    if session_id:
+        session_file = SESSION_MEMORY_DIR / f"{session_id[:8]}.md"
+        result["MEMORY.md"] = session_file.read_text(encoding="utf-8") if session_file.exists() else ""
+    else:
+        result["MEMORY.md"] = ""
+
+    # 用户画像（全局共用）
+    result["USER.md"] = USER_FILE.read_text(encoding="utf-8") if USER_FILE.exists() else ""
     return jsonify(result)
 
 
