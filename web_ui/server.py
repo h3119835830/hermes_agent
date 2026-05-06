@@ -409,7 +409,11 @@ def chat():
                 return
             event_q.put(("status", "🧠 加载记忆与上下文..."))
             event_q.put(("status", "🔗 连接 DeepSeek API..."))
-            response = agent.chat(full_message)
+            
+            def _text_delta(text):
+                event_q.put(("chunk", text))
+                
+            response = agent.chat(full_message, stream_callback=_text_delta)
             # 读取 token 用量（当前会话累计）
             token_total = getattr(agent, "session_total_tokens", 0)
             token_in    = getattr(agent, "session_input_tokens", 0) or getattr(agent, "session_prompt_tokens", 0)
@@ -430,30 +434,33 @@ def chat():
 
     def generate():
         while True:
-            # 先消费事件队列（工具调用 / reasoning / status）
-            try:
-                ev = event_q.get_nowait()
-                ev_type = ev[0]
-                if ev_type == "status":
-                    yield f"data: {json.dumps({'type': 'status', 'content': ev[1]})}\n\n"
-                elif ev_type == "tool_start":
-                    yield f"data: {json.dumps({'type': 'tool_start', 'name': ev[1]['name'], 'label': ev[1]['label']})}\n\n"
-                elif ev_type == "tool_done":
-                    yield f"data: {json.dumps({'type': 'tool_done', 'name': ev[1]['name']})}\n\n"
-                elif ev_type == "reasoning":
-                    yield f"data: {json.dumps({'type': 'reasoning', 'text': ev[1]['text']})}\n\n"
-                continue
-            except queue.Empty:
-                pass
+            # 先消费事件队列中的所有事件
+            while True:
+                try:
+                    ev = event_q.get_nowait()
+                    ev_type = ev[0]
+                    if ev_type == "status":
+                        yield f"data: {json.dumps({'type': 'status', 'content': ev[1]})}\n\n"
+                    elif ev_type == "tool_start":
+                        yield f"data: {json.dumps({'type': 'tool_start', 'name': ev[1]['name'], 'label': ev[1]['label']})}\n\n"
+                    elif ev_type == "tool_done":
+                        yield f"data: {json.dumps({'type': 'tool_done', 'name': ev[1]['name']})}\n\n"
+                    elif ev_type == "reasoning":
+                        yield f"data: {json.dumps({'type': 'reasoning', 'text': ev[1]['text']})}\n\n"
+                    elif ev_type == "chunk":
+                        yield f"data: {json.dumps({'type': 'chunk', 'content': ev[1]})}\n\n"
+                except queue.Empty:
+                    break
 
             try:
                 result = result_q.get(timeout=0.3)
                 break
             except queue.Empty:
-                if not t.is_alive():
+                if not t.is_alive() and event_q.empty():
                     result = ("error", "Agent 线程意外退出", 0, 0, 0)
                     break
                 yield f"data: {json.dumps({'type': 'heartbeat'})}\n\n"
+                time.sleep(0.1)
 
         kind = result[0]
         content = result[1]
