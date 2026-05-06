@@ -210,6 +210,14 @@ def get_or_create_agent(session_id: str, web_search: bool = False,
             tool_complete_callback=_tool_complete,
             reasoning_callback=_reasoning,
         )
+        
+        # 强制开启记忆和用户画像（Web UI 直接管理）
+        agent._memory_enabled = True
+        agent._user_profile_enabled = True
+        if getattr(agent, "_memory_store", None) is None:
+            from tools.memory_tool import MemoryStore
+            agent._memory_store = MemoryStore()
+
         sd["agent"] = agent
         sd["web_search_enabled"] = web_search
 
@@ -416,7 +424,33 @@ def chat():
             def _text_delta(text):
                 event_q.put(("chunk", text))
                 
-            response = agent.chat(full_message, stream_callback=_text_delta)
+            # ── 方案C：上下文滑动窗口与摘要回填 ──
+            # 从前端传来的会话记录中提取滑动窗口（比如最近 10 条消息 = 5轮），不含刚 append 的 full_message
+            window_size = 10
+            history_msgs = sessions[session_id]["messages"][:-1]
+            sliding_window = [
+                {"role": m["role"], "content": m["content"]}
+                for m in history_msgs
+            ][-window_size:]
+
+            # 如果本会话的摘要文件存在，我们把它作为第一条系统消息喂进去，帮助 AI 回忆前面的内容
+            session_summary_file = SESSION_MEMORY_DIR / f"{session_id[:8]}.md"
+            if session_summary_file.exists():
+                summary_text = session_summary_file.read_text(encoding="utf-8")
+                sliding_window.insert(0, {
+                    "role": "system", 
+                    "content": f"【系统提示：较早的对话历史已被折叠为摘要，如下所示】\n\n{summary_text}"
+                })
+
+            # 使用 run_conversation 传递组装好的滑动窗口历史
+            result = agent.run_conversation(
+                user_message=full_message,
+                conversation_history=sliding_window,
+                stream_callback=_text_delta,
+                task_id=session_id
+            )
+            response = result.get("final_response", "")
+
             # 读取 token 用量（当前会话累计）
             token_total = getattr(agent, "session_total_tokens", 0)
             token_in    = getattr(agent, "session_input_tokens", 0) or getattr(agent, "session_prompt_tokens", 0)
