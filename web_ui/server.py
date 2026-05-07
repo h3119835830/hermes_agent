@@ -30,6 +30,7 @@ MEMORY_DIR = HERMES_HOME / "memories"
 SESSION_MEMORY_DIR = MEMORY_DIR / "sessions"  # 会话专属记忆目录
 GLOBAL_MEMORY_FILE = MEMORY_DIR / "MEMORY.md"  # 通用记忆（全局）
 USER_FILE = MEMORY_DIR / "USER.md"             # 用户画像（全局）
+USAGE_LOG_FILE = Path(__file__).parent / "usage_log.json"  # 使用日志
 
 # 触发摘要的消息阈值（每隔 N 条 assistant 消息触发一次）
 SUMMARY_EVERY_N = 10
@@ -37,6 +38,26 @@ SUMMARY_EVERY_N = 10
 # In-memory session store
 # { session_id: { agent, title, messages, created_at, summarized_count } }
 sessions: dict = {}
+
+
+# ---------------------------------------------------------------------------
+# Usage log helpers
+# ---------------------------------------------------------------------------
+
+def append_usage_log(entry: dict):
+    """追加一条使用记录到 usage_log.json"""
+    try:
+        if USAGE_LOG_FILE.exists():
+            with open(USAGE_LOG_FILE, "r", encoding="utf-8") as f:
+                logs = json.load(f)
+        else:
+            logs = []
+        logs.insert(0, entry)  # 最新的排最前
+        logs = logs[:500]       # 最多保留 500 条
+        with open(USAGE_LOG_FILE, "w", encoding="utf-8") as f:
+            json.dump(logs, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
 
 
 # ---------------------------------------------------------------------------
@@ -58,6 +79,7 @@ def load_sessions():
                     "token_total": sd.get("token_total", 0),
                     "token_in":    sd.get("token_in", 0),
                     "token_out":   sd.get("token_out", 0),
+                    "approval_q": queue.Queue()
                 }
         except Exception:
             pass
@@ -301,12 +323,13 @@ def list_sessions():
             "title": sd["title"],
             "message_count": len(sd["messages"]),
             "created_at": sd["created_at"],
+            "last_accessed": sd.get("last_accessed", sd["created_at"]),
             "last_message": last,
             "token_total": sd.get("token_total", 0),
             "token_in":    sd.get("token_in", 0),
             "token_out":   sd.get("token_out", 0),
         })
-    result.sort(key=lambda x: x["created_at"], reverse=True)
+    result.sort(key=lambda x: x["last_accessed"], reverse=True)
     return jsonify(result)
 
 
@@ -327,15 +350,18 @@ def interrupt_session(session_id):
 @app.route("/api/sessions/new", methods=["POST"])
 def new_session():
     sid = str(uuid.uuid4())
+    now = datetime.now().isoformat()
     sessions[sid] = {
         "agent": None,
         "title": "新会话",
         "messages": [],
-        "created_at": datetime.now().isoformat(),
+        "created_at": now,
+        "last_accessed": now,
         "summarized_count": 0,
         "token_total": 0,
         "token_in":    0,
         "token_out":   0,
+        "approval_q": queue.Queue()
     }
     save_sessions()
     return jsonify({"session_id": sid, "title": "新会话"})
@@ -367,6 +393,19 @@ def get_memories():
     })
 
 
+@app.route("/api/usage_logs", methods=["GET"])
+def get_usage_logs():
+    try:
+        if USAGE_LOG_FILE.exists():
+            with open(USAGE_LOG_FILE, "r", encoding="utf-8") as f:
+                logs = json.load(f)
+        else:
+            logs = []
+    except Exception:
+        logs = []
+    return jsonify(logs)
+
+
 @app.route("/api/chat", methods=["POST"])
 def chat():
     data = request.get_json(force=True)
@@ -377,6 +416,10 @@ def chat():
 
     if not session_id or session_id not in sessions:
         return jsonify({"error": "无效的会话 ID"}), 400
+
+    # 每次收到消息时更新最后访问时间
+    sessions[session_id]["last_accessed"] = datetime.now().isoformat()
+    _req_start_time = time.time()  # 用于计算本次请求总用时
 
     if is_regenerate:
         if sessions[session_id]["messages"] and sessions[session_id]["messages"][-1]["role"] == "assistant":
@@ -424,6 +467,16 @@ def chat():
             def _text_delta(text):
                 event_q.put(("chunk", text))
                 
+            from tools.terminal_tool import set_approval_callback
+            def _approval_handler(command, description, **kwargs):
+                event_q.put(("approval_required", {"command": command, "description": description}))
+                try:
+                    resp = sessions[session_id]["approval_q"].get(timeout=300)
+                    return resp
+                except queue.Empty:
+                    return False
+            set_approval_callback(_approval_handler)
+
             # ── 方案C：上下文滑动窗口与摘要回填 ──
             # 从前端传来的会话记录中提取滑动窗口（比如最近 10 条消息 = 5轮），不含刚 append 的 full_message
             window_size = 10
@@ -548,6 +601,19 @@ def chat():
                 yield f"data: {json.dumps({'type': 'chunk', 'content': chunk})}\n\n"
                 time.sleep(0.012)
 
+        # ── 写入使用日志 ──
+        elapsed_ms = int((time.time() - _req_start_time) * 1000)
+        append_usage_log({
+            "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "model": sessions[session_id]["agent"].model if sessions[session_id].get("agent") else "unknown",
+            "duration_ms": elapsed_ms,
+            "ttft_ms": sessions[session_id].get("_ttft_ms", 0),
+            "input_tokens": token_in,
+            "output_tokens": token_out,
+            "streaming": got_stream_chunks,
+            "session_id": session_id[:8],
+        })
+
         yield f"data: {json.dumps({'type': 'done', 'session_title': sessions[session_id]['title'], 'token_total': token_total, 'token_in': token_in, 'token_out': token_out})}\n\n"
 
     return Response(
@@ -564,6 +630,17 @@ def chat():
 # Entry point
 # ---------------------------------------------------------------------------
 
+@app.route('/api/approval_respond', methods=['POST'])
+def approval_respond():
+    data = request.json
+    session_id = data.get('session_id')
+    approved = data.get('approved', False)
+    sd = sessions.get(session_id)
+    if sd and 'approval_q' in sd:
+        sd['approval_q'].put(approved)
+        return jsonify({'status': 'ok'})
+    return jsonify({'error': 'session not found'}), 404
+
 if __name__ == "__main__":
     load_sessions()
     if not sessions:
@@ -574,6 +651,7 @@ if __name__ == "__main__":
             "messages": [],
             "created_at": datetime.now().isoformat(),
             "summarized_count": 0,
+            "approval_q": queue.Queue()
         }
         save_sessions()
 

@@ -9,7 +9,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css" />
-  <link rel="stylesheet" href="/static/style.css?v=6" />
+  <link rel="stylesheet" href="/static/style.css?v=7" />
   <style>
     /* 强制覆盖气泡框宽度，绕过任何缓存 */
     .message.user      { max-width: 420px !important; }
@@ -57,7 +57,57 @@
     </button>
     <div class="sidebar-label">历史会话</div>
     <div id="session-list" role="list"></div>
+
+    <!-- 更多会话省略号按钮 -->
+    <button id="more-sessions-btn" class="more-sessions-btn hidden" title="查看更多历史会话">
+      ··· 更多会话
+    </button>
+
+    <!-- 更多会话弹出小框 -->
+    <div id="more-sessions-popup" class="more-sessions-popup hidden">
+      <div class="more-sessions-header">
+        <span>历史会话</span>
+        <button id="close-more-sessions" class="close-popup-btn">✕</button>
+      </div>
+      <div id="more-sessions-list"></div>
+    </div>
+
+    <!-- 左下角使用日志按钮 -->
+    <div class="sidebar-footer">
+      <button id="usage-log-btn" class="usage-log-btn" title="查看模型使用记录">
+        📊 使用日志
+      </button>
+    </div>
   </aside>
+
+  <!-- 使用日志弹框 -->
+  <div id="usage-log-modal" class="usage-log-overlay hidden">
+    <div class="usage-log-box">
+      <div class="usage-log-header">
+        <span>📊 模型使用日志</span>
+        <button id="close-usage-log" class="close-popup-btn">✕</button>
+      </div>
+      <div class="usage-log-body">
+        <table class="usage-table">
+          <thead>
+            <tr>
+              <th>时间</th>
+              <th>模型</th>
+              <th>用时</th>
+              <th>首字</th>
+              <th>输入</th>
+              <th>输出</th>
+              <th>流式</th>
+            </tr>
+          </thead>
+          <tbody id="usage-log-tbody">
+            <tr><td colspan="7" class="log-empty">暂无记录</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
 
   <!-- Center: Chat -->
   <section id="chat-panel">
@@ -156,8 +206,29 @@
     </div>
   </div>
 </template>
+<!-- Approval Modal -->
+<div id="approval-modal" class="modal-overlay hidden">
+  <div class="modal-content">
+    <div class="modal-header">
+      <span class="modal-icon">⚠️</span>
+      <h2>敏感操作确认</h2>
+    </div>
+    <div class="modal-body">
+      <p>Hermes Agent 试图执行可能带有危险性的终端操作，请确认是否允许：</p>
+      <div class="command-box">
+        <code id="approval-command">rm -rf /</code>
+      </div>
+      <p class="command-desc" id="approval-desc">描述信息</p>
+    </div>
+    <div class="modal-footer">
+      <button id="btn-deny" class="btn-deny">拒绝 (Deny)</button>
+      <button id="btn-approve" class="btn-approve">允许 (Approve)</button>
+    </div>
+  </div>
+</div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
-<script src="/static/app.js?v=4"></script>
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<script src="/static/app.js?v=6"></script>
 </body>
 </html>

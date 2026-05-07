@@ -87,23 +87,46 @@ async function loadSessions() {
   }
 }
 
+// 全局存储完整会话列表（用于「更多」弹框）
+let _allSessions = [];
+
 function renderSessionList(list) {
+  _allSessions = list;
   sessionList.innerHTML = '';
-  list.forEach(s => {
-    const item = document.createElement('div');
-    item.className = 'session-item';
-    item.dataset.id = s.id;
-    item.setAttribute('role', 'listitem');
-    item.innerHTML = `
-      <div class="session-title">${escHtml(s.title)}</div>
-      <div class="session-meta">${s.message_count} 条消息${s.last_message ? ' · ' + escHtml(s.last_message) : ''}</div>
-    `;
-    item.addEventListener('click', () => {
-      selectSession(s.id);
-      restoreTokenFromSession(s.id, list);
-    });
-    sessionList.appendChild(item);
+
+  const visible = list.slice(0, 5);
+  const rest    = list.slice(5);
+
+  visible.forEach(s => {
+    sessionList.appendChild(buildSessionItem(s, list));
   });
+
+  // 更多会话按钮
+  const moreBtn = $('more-sessions-btn');
+  if (rest.length > 0) {
+    moreBtn.textContent = `··· 还有 ${rest.length} 条会话`;
+    moreBtn.classList.remove('hidden');
+  } else {
+    moreBtn.classList.add('hidden');
+  }
+}
+
+function buildSessionItem(s, allList) {
+  const item = document.createElement('div');
+  item.className = 'session-item';
+  item.dataset.id = s.id;
+  item.setAttribute('role', 'listitem');
+  item.innerHTML = `
+    <div class="session-title">${escHtml(s.title)}</div>
+    <div class="session-meta">${s.message_count} 条消息${s.last_message ? ' · ' + escHtml(s.last_message) : ''}</div>
+  `;
+  item.addEventListener('click', () => {
+    selectSession(s.id);
+    restoreTokenFromSession(s.id, allList || _allSessions);
+    // 如果是从「更多」弹框点击的，关闭它
+    $('more-sessions-popup').classList.add('hidden');
+  });
+  return item;
 }
 
 async function selectSession(sessionId) {
@@ -515,6 +538,13 @@ async function regenerateLast() {
           } else if (evt.type === 'status') {
             const statusEl = document.querySelector('#thinking-indicator .thinking-status');
             if (statusEl) statusEl.textContent = evt.content;
+          } else if (evt.type === 'approval_required') {
+            const approvalModal = document.getElementById('approval-modal');
+            const approvalCommand = document.getElementById('approval-command');
+            const approvalDesc = document.getElementById('approval-desc');
+            approvalCommand.textContent = evt.content.command || '未知命令';
+            approvalDesc.textContent = evt.content.description || '危险操作警告';
+            approvalModal.classList.remove('hidden');
           } else if (evt.type === 'chunk') {
             if (thinkEl && thinkEl.parentNode) thinkEl.remove();
             if (!aiBubbleEl) {
@@ -641,53 +671,18 @@ function renderMemory(tab) {
 // ── Markdown renderer (highlight.js + copy button) ────────────────────────
 function renderMarkdown(text) {
   if (!text) return '';
-
-  // 先处理代码块（保护不被其他替换破坏）
-  const codeBlocks = [];
-  let html = text.replace(/```([a-z]*)\n([\s\S]*?)```/g, (_, lang, code) => {
-    const id = `cb-${codeBlocks.length}`;
-    const highlighted = (lang && window.hljs && hljs.getLanguage(lang))
-      ? hljs.highlight(code.trimEnd(), { language: lang }).value
-      : (window.hljs ? hljs.highlightAuto(code.trimEnd()).value : escHtml(code.trimEnd()));
-    const langBadge = lang ? `<span class="code-lang">${escHtml(lang)}</span>` : '';
-    codeBlocks.push(
-      `<div class="code-block-wrap">` +
-      `<div class="code-header">${langBadge}<button class="copy-btn" onclick="copyCode(this)" title="复制代码">复制</button></div>` +
-      `<pre><code class="hljs${lang ? ` language-${lang}` : ''}">${highlighted}</code></pre>` +
-      `</div>`
-    );
-    return `%%CODEBLOCK_${id}%%`;
-  });
-
-  // 内联代码
-  html = escHtml(html);
-  html = html.replace(/`([^`\n]+)`/g, '<code class="inline-code">$1</code>');
-
-  // 粗体、斜体
-  html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
-  html = html.replace(/\*(.+?)\*/g,     '<em>$1</em>');
-
-  // 标题
-  html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
-  html = html.replace(/^## (.+)$/gm,  '<h2>$1</h2>');
-  html = html.replace(/^# (.+)$/gm,   '<h1>$1</h1>');
-
-  // 分割线
-  html = html.replace(/^---+$/gm, '<hr/>');
-
-  // 列表
-  html = html.replace(/^[-*] (.+)$/gm, '<li>$1</li>');
-  html = html.replace(/(<li>.*<\/li>)/s, '<ul>$1</ul>');
-  html = html.replace(/^\d+\. (.+)$/gm, '<li>$1</li>');
-
-  // 换行
-  html = html.replace(/\n\n/g, '<br/><br/>');
-  html = html.replace(/\n/g,   '<br/>');
-
-  // 还原代码块
-  html = html.replace(/%%CODEBLOCK_cb-(\d+)%%/g, (_, i) => codeBlocks[+i]);
-
-  return html;
+  if (typeof marked !== 'undefined') {
+    marked.setOptions({
+      highlight: function(code, lang) {
+        if (lang && hljs.getLanguage(lang)) {
+          return hljs.highlight(code, { language: lang }).value;
+        }
+        return hljs.highlightAuto(code).value;
+      }
+    });
+    return marked.parse(text);
+  }
+  return text;
 }
 
 // 复制代码按钮处理
@@ -780,3 +775,110 @@ function bindEvents() {
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', init);
+
+// ── Approval Modal ───────────────────────────────────────────────────────────
+const approvalModal = document.getElementById('approval-modal');
+const btnApprove = document.getElementById('btn-approve');
+const btnDeny = document.getElementById('btn-deny');
+
+if (btnApprove && btnDeny) {
+  btnApprove.addEventListener('click', () => submitApproval(true));
+  btnDeny.addEventListener('click', () => submitApproval(false));
+}
+
+async function submitApproval(approved) {
+  approvalModal.classList.add('hidden');
+  try {
+    await fetch('/api/approval_respond', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_id: state.currentSessionId, approved })
+    });
+  } catch (e) {
+    console.error('Approval respond failed', e);
+  }
+}
+
+// ── More Sessions Popup ───────────────────────────────────────────────────────
+const moreSessionsBtn   = document.getElementById('more-sessions-btn');
+const moreSessionsPopup = document.getElementById('more-sessions-popup');
+const closeMoreSessions = document.getElementById('close-more-sessions');
+const moreSessionsList  = document.getElementById('more-sessions-list');
+
+if (moreSessionsBtn) {
+  moreSessionsBtn.addEventListener('click', () => {
+    moreSessionsList.innerHTML = '';
+    const rest = _allSessions.slice(5);
+    rest.forEach(s => moreSessionsList.appendChild(buildSessionItem(s, _allSessions)));
+    moreSessionsPopup.classList.toggle('hidden');
+  });
+}
+
+if (closeMoreSessions) {
+  closeMoreSessions.addEventListener('click', () => {
+    moreSessionsPopup.classList.add('hidden');
+  });
+}
+
+// ── Usage Log Modal ───────────────────────────────────────────────────────────
+const usageLogBtn   = document.getElementById('usage-log-btn');
+const usageLogModal = document.getElementById('usage-log-modal');
+const closeUsageLog = document.getElementById('close-usage-log');
+const usageLogTbody = document.getElementById('usage-log-tbody');
+
+if (usageLogBtn) {
+  usageLogBtn.addEventListener('click', async () => {
+    usageLogModal.classList.toggle('hidden');
+    if (!usageLogModal.classList.contains('hidden')) {
+      await fetchUsageLogs();
+    }
+  });
+}
+
+if (closeUsageLog) {
+  closeUsageLog.addEventListener('click', () => {
+    usageLogModal.classList.add('hidden');
+  });
+}
+
+// 点击弹框外部关闭
+if (usageLogModal) {
+  usageLogModal.addEventListener('click', e => {
+    if (e.target === usageLogModal) usageLogModal.classList.add('hidden');
+  });
+}
+
+async function fetchUsageLogs() {
+  try {
+    const res  = await fetch('/api/usage_logs');
+    const logs = await res.json();
+    renderUsageLogs(logs);
+  } catch (_) {
+    if (usageLogTbody) usageLogTbody.innerHTML = '<tr><td colspan="7" class="log-empty">加载失败</td></tr>';
+  }
+}
+
+function renderUsageLogs(logs) {
+  if (!usageLogTbody) return;
+  if (!logs || logs.length === 0) {
+    usageLogTbody.innerHTML = '<tr><td colspan="7" class="log-empty">暂无记录</td></tr>';
+    return;
+  }
+  usageLogTbody.innerHTML = logs.map(log => {
+    const dur  = log.duration_ms ? (log.duration_ms / 1000).toFixed(1) + 's' : '—';
+    const ttft = log.ttft_ms    ? (log.ttft_ms / 1000).toFixed(2) + 's' : '—';
+    const modelShort = (log.model || '').replace('deepseek-', 'ds-');
+    const stream = log.streaming
+      ? '<span class="log-yes">✓</span>'
+      : '<span class="log-no">✗</span>';
+    return `<tr>
+      <td>${escHtml(log.time || '—')}</td>
+      <td title="${escHtml(log.model || '')}"><span class="log-model">${escHtml(modelShort)}</span></td>
+      <td>${dur}</td>
+      <td>${ttft}</td>
+      <td>${(log.input_tokens || 0).toLocaleString()}</td>
+      <td>${(log.output_tokens || 0).toLocaleString()}</td>
+      <td>${stream}</td>
+    </tr>`;
+  }).join('');
+}

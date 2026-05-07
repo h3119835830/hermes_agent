@@ -1,0 +1,32 @@
+[
+  {
+    "time": "2026-05-07 11:30:09",
+    "model": "deepseek-reasoner",
+    "duration_ms": 12503,
+    "ttft_ms": 0,
+    "input_tokens": 30731,
+    "output_tokens": 1908,
+    "streaming": true,
+    "session_id": "edc60a8d"
+  },
+  {
+    "time": "2026-05-07 11:22:32",
+    "model": "deepseek-reasoner",
+    "duration_ms": 22994,
+    "ttft_ms": 0,
+    "input_tokens": 28049,
+    "output_tokens": 1304,
+    "streaming": true,
+    "session_id": "edc60a8d"
+  },
+  {
+    "time": "2026-05-07 11:21:00",
+    "model": "deepseek-reasoner",
+    "duration_ms": 30352,
+    "ttft_ms": 0,
+    "input_tokens": 13800,
+    "output_tokens": 629,
+    "streaming": true,
+    "session_id": "edc60a8d"
+  }
+]
