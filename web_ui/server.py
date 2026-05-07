@@ -102,89 +102,6 @@ def save_sessions():
         json.dump(data, f, ensure_ascii=False, indent=2)
 
 
-# ---------------------------------------------------------------------------
-# Memory summarization (Plan C core)
-# ---------------------------------------------------------------------------
-
-def _build_summary_prompt(session_id: str, messages: list) -> str:
-    """构建给 DeepSeek 的摘要 prompt"""
-    history_text = ""
-    for m in messages:
-        role = "用户" if m["role"] == "user" else "助手"
-        history_text += f"【{role}】{m['content'][:300]}\n\n"
-
-    return f"""请对以下对话内容生成一份简洁的结构化记忆摘要，以 Markdown 格式输出。
-包含：关键事实、用户需求、重要决定、待办事项（如有）。不要复述原文，只保留核心信息。
-
-会话ID: {session_id[:8]}...
----
-{history_text}
----
-请输出结构化摘要："""
-
-
-def trigger_memory_summary(session_id: str):
-    """后台线程：调用 DeepSeek 生成摘要，追加写入 MEMORY.md"""
-    def _do():
-        try:
-            sd = sessions.get(session_id)
-            if not sd:
-                return
-
-            messages = sd["messages"]
-            if not messages:
-                return
-
-            # 只摘要新增部分（避免重复摘要）
-            already = sd.get("summarized_count", 0)
-            new_msgs = messages[already:]
-            if len(new_msgs) < 4:
-                return
-
-            api_key = os.getenv("DEEPSEEK_API_KEY") or os.getenv("OPENAI_API_KEY", "")
-            if not api_key:
-                return
-
-            client = OpenAI(api_key=api_key, base_url="https://api.deepseek.com/v1/")
-            prompt = _build_summary_prompt(session_id, new_msgs)
-
-            resp = client.chat.completions.create(
-                model="deepseek-chat",
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=600,
-                temperature=0.3,
-            )
-            summary = resp.choices[0].message.content.strip()
-
-            # 写入会话专属摘要文件（覆盖写，始终是最新完整摘要）
-            SESSION_MEMORY_DIR.mkdir(parents=True, exist_ok=True)
-            session_file = SESSION_MEMORY_DIR / f"{session_id[:8]}.md"
-            title = sd.get("title", "未命名会话")
-            now = datetime.now().strftime("%Y-%m-%d %H:%M")
-            tok_total = sd.get("token_total", 0)
-            tok_in    = sd.get("token_in", 0)
-            tok_out   = sd.get("token_out", 0)
-            fmt = lambda n: f"{n:,}" if n else "0"
-            token_line = f"⚡ 累计 Token：{fmt(tok_total)}（输入 {fmt(tok_in)} / 输出 {fmt(tok_out)}）"
-            content = (
-                f"# 会话摘要：{title}\n\n"
-                f"> 最后更新：{now}  \n"
-                f"> {token_line}\n\n"
-                f"{summary}\n"
-            )
-            with open(session_file, "w", encoding="utf-8") as f:
-                f.write(content)
-
-            # 更新已摘要的消息数
-            sd["summarized_count"] = len(messages)
-            save_sessions()
-
-        except Exception as e:
-            print(f"[Memory Summary] 摘要失败: {e}")
-
-    t = threading.Thread(target=_do, daemon=True)
-    t.start()
-
 
 # ---------------------------------------------------------------------------
 # Agent helpers
@@ -197,14 +114,14 @@ def get_or_create_agent(session_id: str, web_search: bool = False,
     sd = sessions[session_id]
 
     def _make_callbacks():
-        def _tool_start(tool_name, args, **kw):
+        def _tool_start(tool_call_id, function_name, function_args, **kw):
             if event_q:
-                label = _tool_label(tool_name, args)
-                event_q.put(("tool_start", {"name": tool_name, "label": label}))
+                label = _tool_label(function_name, function_args)
+                event_q.put(("tool_start", {"name": tool_call_id, "label": label}))
 
-        def _tool_complete(tool_name, result, **kw):
+        def _tool_complete(tool_call_id, function_name, function_args, function_result, **kw):
             if event_q:
-                event_q.put(("tool_done", {"name": tool_name}))
+                event_q.put(("tool_done", {"name": tool_call_id}))
 
         def _reasoning(text, **kw):
             if event_q:
@@ -294,6 +211,8 @@ def _tool_label(tool_name: str, args: dict) -> str:
         "memory": lambda a: f"🧠 访问记忆",
         "todo": lambda a: f"📋 操作待办",
         "browser_navigate": lambda a: f"🌐 浏览器导航「{str(a.get('url', ''))[:30]}」",
+        "delegate": lambda a: f"🤖 派生子智能体执行「{str(a.get('task', ''))[:30]}」",
+        "subagent_spawn": lambda a: f"🤖 派生子智能体执行「{str(a.get('task', ''))[:30]}」",
     }
     fn = labels.get(tool_name)
     if fn:
@@ -477,28 +396,18 @@ def chat():
                     return False
             set_approval_callback(_approval_handler)
 
-            # ── 方案C：上下文滑动窗口与摘要回填 ──
-            # 从前端传来的会话记录中提取滑动窗口（比如最近 10 条消息 = 5轮），不含刚 append 的 full_message
-            window_size = 10
+            # 直接传递完整的对话历史（去掉最后一条刚刚 append 的 full_message）
+            # AIAgent 内部的 ContextCompressor 会自动处理超长上下文的 Token 预算和摘要压缩
             history_msgs = sessions[session_id]["messages"][:-1]
-            sliding_window = [
+            full_history = [
                 {"role": m["role"], "content": m["content"]}
                 for m in history_msgs
-            ][-window_size:]
+            ]
 
-            # 如果本会话的摘要文件存在，我们把它作为第一条系统消息喂进去，帮助 AI 回忆前面的内容
-            session_summary_file = SESSION_MEMORY_DIR / f"{session_id[:8]}.md"
-            if session_summary_file.exists():
-                summary_text = session_summary_file.read_text(encoding="utf-8")
-                sliding_window.insert(0, {
-                    "role": "system", 
-                    "content": f"【系统提示：较早的对话历史已被折叠为摘要，如下所示】\n\n{summary_text}"
-                })
-
-            # 使用 run_conversation 传递组装好的滑动窗口历史
+            # 使用 run_conversation 传递完整的历史记录
             result = agent.run_conversation(
                 user_message=full_message,
-                conversation_history=sliding_window,
+                conversation_history=full_history,
                 stream_callback=_text_delta,
                 task_id=session_id
             )
@@ -585,13 +494,6 @@ def chat():
             "content": content,
         })
         save_sessions()
-
-        # ── 方案C：摘要触发器 ──
-        assistant_count = sum(1 for m in sessions[session_id]["messages"] if m["role"] == "assistant")
-        already_summarized = sessions[session_id].get("summarized_count", 0)
-        total_msgs = len(sessions[session_id]["messages"])
-        if assistant_count > 0 and assistant_count % SUMMARY_EVERY_N == 0 and total_msgs > already_summarized:
-            trigger_memory_summary(session_id)
 
         # 如果没有收到实时流式 chunk（非流式模式），才按小块和打字机效果输出
         if not got_stream_chunks:

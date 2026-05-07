@@ -295,13 +295,11 @@ function handleSseEvent(evt, ctx) {
     const badge = activeToolBadges[evt.name];
     if (badge) {
       badge.classList.remove('running');
-      badge.querySelector('.tool-spinner')?.remove();
-      // 完成后 2 秒淡出
-      setTimeout(() => {
-        badge.style.transition = 'opacity 0.5s';
-        badge.style.opacity = '0';
-        setTimeout(() => badge.remove(), 500);
-      }, 2000);
+      badge.classList.add('done');
+      const spinner = badge.querySelector('.tool-spinner');
+      if (spinner) spinner.outerHTML = '✅ ';
+      
+      // 不再淡出移除，保留在聊天记录中以供查看
       delete activeToolBadges[evt.name];
     }
 
