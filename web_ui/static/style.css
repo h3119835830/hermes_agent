@@ -242,7 +242,7 @@ body {
   flex-direction: column;
   padding: 14px 10px;
   gap: 10px;
-  overflow: hidden;
+  overflow: visible;
   transition: background 0.4s, border-color 0.4s;
 }
 
@@ -1085,3 +1085,39 @@ body.theme-neon #chat-panel::after {
 /* sidebar needs position:relative for popup anchor */
 #session-sidebar { position: relative; }
 
+
+/* Session List Layout & Delete Button */
+.session-item {
+  display: flex !important;
+  justify-content: space-between !important;
+  align-items: center !important;
+}
+.session-info {
+  flex: 1;
+  min-width: 0; /* allows truncation */
+}
+.session-actions {
+  display: none; /* hidden by default */
+  margin-left: 8px;
+}
+.session-item:hover .session-actions {
+  display: block; /* show on hover */
+}
+.delete-session-btn {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  padding: 4px;
+  font-size: 14px;
+  border-radius: 4px;
+}
+.delete-session-btn:hover {
+  background: rgba(255, 0, 0, 0.2);
+  color: #ff4d4f;
+}
+
+/* Fix for More Sessions Popup Pointer Events */
+.more-sessions-popup {
+  pointer-events: auto !important;
+}

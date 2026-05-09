@@ -1,27 +1,26 @@
-"""MemoryManager — orchestrates the built-in memory provider plus at most
-ONE external plugin memory provider.
+"""MemoryManager — 负责统筹和调度内置记忆提供者，以及最多【一个】外部插件记忆提供者。
 
-Single integration point in run_agent.py. Replaces scattered per-backend
-code with one manager that delegates to registered providers.
+它是 run_agent.py 中处理记忆的单一集成点。通过这一个管理器统筹所有已注册的记忆后端，
+避免了以前代码中记忆处理逻辑散落各处的问题。
 
-The BuiltinMemoryProvider is always registered first and cannot be removed.
-Only ONE external (non-builtin) provider is allowed at a time — attempting
-to register a second external provider is rejected with a warning.  This
-prevents tool schema bloat and conflicting memory backends.
+内置的记忆提供者 (BuiltinMemoryProvider) 永远会优先注册，并且无法被移除。
+同时，每次只允许存在【一个】外部（非内置）记忆提供者 —— 如果试图注册第二个外部记忆提供者，
+系统会抛出警告并拒绝。这样设计是为了防止注入的工具描述过多（schema bloat），
+并避免多个记忆后端之间发生冲突。
 
-Usage in run_agent.py:
+在 run_agent.py 中的使用方法示例:
     self._memory_manager = MemoryManager()
     self._memory_manager.add_provider(BuiltinMemoryProvider(...))
-    # Only ONE of these:
+    # 下面的外部记忆提供者只能添加一个:
     self._memory_manager.add_provider(plugin_provider)
 
-    # System prompt
+    # 1. 组装系统提示词（将历史知识拼接进去）
     prompt_parts.append(self._memory_manager.build_system_prompt())
 
-    # Pre-turn
+    # 2. 回合开始前：预取记忆
     context = self._memory_manager.prefetch_all(user_message)
 
-    # Post-turn
+    # 3. 回合结束后：同步记忆，并为下一轮排队预取
     self._memory_manager.sync_all(user_msg, assistant_response)
     self._memory_manager.queue_prefetch_all(user_msg)
 """

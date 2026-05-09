@@ -1,17 +1,16 @@
 #!/usr/bin/env python3
 """
-SQLite State Store for Hermes Agent.
+Hermes Agent 的 SQLite 状态存储库。
 
-Provides persistent session storage with FTS5 full-text search, replacing
-the per-session JSONL file approach. Stores session metadata, full message
-history, and model configuration for CLI and gateway sessions.
+提供基于 FTS5 全文搜索的持久化会话存储，取代了之前每个会话一个 JSONL 文件的方案。
+存储了 CLI 和网关会话的元数据、完整消息历史记录以及模型配置。
 
-Key design decisions:
-- WAL mode for concurrent readers + one writer (gateway multi-platform)
-- FTS5 virtual table for fast text search across all session messages
-- Compression-triggered session splitting via parent_session_id chains
-- Batch runner and RL trajectories are NOT stored here (separate systems)
-- Session source tagging ('cli', 'telegram', 'discord', etc.) for filtering
+关键设计决策:
+- WAL (预写日志) 模式，支持并发读和单一写（适用于多平台网关）
+- FTS5 虚拟表，实现跨所有会话消息的快速文本搜索
+- 通过 parent_session_id 链实现压缩触发的会话拆分
+- 批处理运行器和强化学习 (RL) 的轨迹【不】存储在这里（它们属于独立的系统）
+- 会话来源标记（如 'cli', 'telegram', 'discord' 等），用于过滤查询
 """
 
 import json
@@ -2533,18 +2532,16 @@ class SessionDB:
     # ── Space reclamation ──
 
     def vacuum(self) -> None:
-        """Run VACUUM to reclaim disk space after large deletes.
+        """运行 VACUUM 以在大规模删除后回收磁盘空间。
 
-        SQLite does not shrink the database file when rows are deleted —
-        freed pages just get reused on the next insert. After a prune that
-        removed hundreds of sessions, the file stays bloated unless we
-        explicitly VACUUM.
+        当行被删除时，SQLite 并不会缩小数据库文件的大小 —— 
+        释放出的页面只会在下次插入时被重用。所以在修剪操作删除了数百个会话后，
+        如果不显式执行 VACUUM，文件依然会保持膨胀的状态。
 
-        VACUUM rewrites the entire DB, so it's expensive (seconds per
-        100MB) and cannot run inside a transaction. It also acquires an
-        exclusive lock, so callers must ensure no other writers are
-        active. Safe to call at startup before the gateway/CLI starts
-        serving traffic.
+        VACUUM 会重写整个数据库，所以它是一项开销很大的操作（每 100MB 耗时数秒），
+        并且不能在事务内部运行。同时它会获取排他锁，所以调用者必须确保没有
+        其他并发写入操作正在进行。通常在网关/CLI 开始服务流量之前的启动阶段
+        调用是安全的。
         """
         # VACUUM cannot be executed inside a transaction.
         with self._lock:
@@ -2562,24 +2559,23 @@ class SessionDB:
         vacuum: bool = True,
         sessions_dir: Optional[Path] = None,
     ) -> Dict[str, Any]:
-        """Idempotent auto-maintenance: prune old sessions + optional VACUUM.
+        """幂等的自动维护任务：修剪（删除）旧会话，并可选执行 VACUUM 回收空间。
 
-        Records the last run timestamp in state_meta so subsequent calls
-        within ``min_interval_hours`` no-op. Designed to be called once at
-        startup from long-lived entrypoints (CLI, gateway, cron scheduler).
+        会在 state_meta 表中记录最后一次运行的时间戳，使得在 ``min_interval_hours``
+        （最小间隔小时数）内的后续重复调用直接跳过。设计为在长生命周期入口
+        （如 CLI、网关、cron 调度器）启动时自动调用一次。
 
-        When *sessions_dir* is provided, on-disk transcript files
-        (``.json`` / ``.jsonl`` / ``request_dump_*``) for pruned sessions
-        are removed as part of the same sweep (issue #3015).
+        如果提供了 *sessions_dir* 参数，修剪旧会话时，属于该会话的旧版基于磁盘的
+        文件（如 ``.json`` / ``.jsonl`` / ``request_dump_*``）也会被一并删除（修复问题 #3015）。
 
-        Never raises. On any failure, logs a warning and returns a dict
-        with ``"error"`` set.
+        【绝对不会抛出异常】。遇到任何失败时，只会记录一条警告日志，
+        并返回一个带有 ``"error"`` 键的字典。
 
-        Returns a dict with keys:
-          - ``"skipped"`` (bool) — true if within min_interval_hours of last run
-          - ``"pruned"`` (int)   — number of sessions deleted
-          - ``"vacuumed"`` (bool) — true if VACUUM ran
-          - ``"error"`` (str, optional) — present only on failure
+        返回的字典包含以下键:
+          - ``"skipped"`` (bool) — 如果距离上次运行还没过 min_interval_hours，则为 true
+          - ``"pruned"`` (int)   — 已删除的会话数量
+          - ``"vacuumed"`` (bool) — 如果执行了 VACUUM 则为 true
+          - ``"error"`` (str, 可选) — 仅在发生失败时存在
         """
         result: Dict[str, Any] = {"skipped": False, "pruned": 0, "vacuumed": False}
         try:
